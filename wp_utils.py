@@ -16,7 +16,7 @@ import scipy.sparse as sp
 
 cur_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append('%s/wp_software/' % cur_dir)
-from drnl import drnl_node_labeling
+# from drnl import drnl_node_labeling
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

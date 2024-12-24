@@ -178,8 +178,7 @@ class SEALOGBLDataset(Dataset):
             subg.remove_edges(subg.edge_ids(*direct_links))
 
         NIDs, EIDs = subg.ndata[dgl.NID], subg.edata[dgl.EID]  # [32] [72]
-
-        z = ngnn_utils.drnl_node_labeling(subg.adj(scipy_fmt="csr"), 0, 1)  # [32]
+        z = ngnn_utils.drnl_node_labeling(subg.adj_external(scipy_fmt="csr"), 0, 1)  # [32]
         edge_weights = (
             self.edge_weights[EIDs] if self.edge_weights is not None else None
         )
@@ -291,11 +290,14 @@ def train(num_datas):
             optimizer.zero_grad()
             x = data.x if args.use_feature else None
             edge_weight = data.edge_weight if args.use_edge_weight else None
-            node_id = data.node_id if emb else None
+            node_id = data.node_id if emb else None            
             new_data = data.clone()
             new_data.x = x
             new_data.edge_weight = edge_weight
             new_data.node_id = node_id
+            print("type:", type(new_data))
+            print("id:", new_data.node_id)
+
             logits = model(new_data)
             loss = BCEWithLogitsLoss()(logits.view(-1), data.y.to(torch.float))
             loss.backward()
@@ -819,6 +821,8 @@ if not args.keep_old:
     root_dir = './' if root_dir == '' else root_dir
     for sub_dir in ['', 'surel_gacc']:
         full_dir = os.path.join(root_dir, sub_dir)
+        if not os.path.exists(full_dir):
+            os.makedirs(full_dir)
         files = [f for f in os.listdir(full_dir) if os.path.isfile(os.path.join(full_dir, f)) and os.path.splitext(f)[1] in ['.py", ".c", ".cpp']]
         backup_dir = os.path.join(backup_root_dir, sub_dir)
         if not os.path.exists(backup_dir):
@@ -1510,7 +1514,7 @@ for run in range(args.runs):
     localtime = time.asctime(time.localtime(time.time()))
     print(f'{localtime} Total number of parameters is {total_params}')
     if args.model.find('DGCNN') != -1:
-        print(f'SortPooling k is set to {model.k}')
+        print(f'SortPooling k is set to {model.ngnndgcnn_noneigfeat.k}')
     with open(log_file, 'a') as f:
         print(f'Total number of parameters is {total_params}', file=f)
         if args.model.find('DGCNN') != -1:

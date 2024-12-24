@@ -13,7 +13,7 @@ import torch
 import torch_sparse
 from torch_sparse import spspmm, SparseTensor
 import torch_geometric
-from torch_geometric.data.sampler import Adj, EdgeIndex
+# from torch_geometric.data.sampler import Adj, EdgeIndex
 from torch_geometric.data import DataLoader as PygDataLoader
 from torch_geometric.data import Data as PygData
 from torch_geometric.utils import (negative_sampling, add_self_loops,
