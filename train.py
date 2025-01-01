@@ -178,7 +178,7 @@ class SEALOGBLDataset(Dataset):
             subg.remove_edges(subg.edge_ids(*direct_links))
 
         NIDs, EIDs = subg.ndata[dgl.NID], subg.edata[dgl.EID]  # [32] [72]
-        z = ngnn_utils.drnl_node_labeling(subg.adj_external(scipy_fmt="csr"), 0, 1)  # [32]
+        z = ngnn_utils.drnl_node_labeling(subg.adj(scipy_fmt="csr"), 0, 1)  # [32] # 去掉了 _external
         edge_weights = (
             self.edge_weights[EIDs] if self.edge_weights is not None else None
         )
