@@ -201,9 +201,10 @@ def run_model(cmd_args):
         "mask_input": cmd_args.mask_input,
         "thresh_1hop": cmd_args.thresh_1hop,
         "thresh_cn": cmd_args.thresh_cn,
-        "thresh_non1hop": cmd_args.thresh_non1hop
-    }
+        "thresh_non1hop": cmd_args.thresh_non1hop,
 
+        'mat_prop': cmd_args.mat_prop
+    }
     train_data(cmd_args, args, data, device, verbose = not cmd_args.non_verbose)
 
 
@@ -262,6 +263,8 @@ def main():
     parser.add_argument('--thresh-cn', type=float, default=1e-2)
     parser.add_argument('--thresh-1hop', type=float, default=1e-2)
     parser.add_argument('--thresh-non1hop', type=float, default=1e-2)
+
+    parser.add_argument('--mat_prop', type=int, default=2)
 
     args = parser.parse_args()
 

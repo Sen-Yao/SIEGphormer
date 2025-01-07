@@ -34,7 +34,7 @@ def train_epoch(model, score_func, data, optimizer, args, device):
     
     for perm in d:
         # print("debug:perm:", perm)
-        # 论文注释：这里的一个 perm 应该就是一个 batch 中，正样本所对应的下标索引张量？
+        # 论文注释：这里的一个 perm 应该就是一个 batch 中，正样本所对应的下标索引构成的张量。
         # 论文注释：这里的 edges 是啥？
         edges = train_pos[perm].t()
 
@@ -43,7 +43,7 @@ def train_epoch(model, score_func, data, optimizer, args, device):
         adjmask[perm] = 0
         # 论文注释：从 train_pos 中选择那些在 adjmask 中仍然为 1 的边（即未被移除的边）。edge2keep 将包含所有需要保留的边。
         edge2keep = train_pos[adjmask, :]
-        # 论文注释：masked_adj 是稀疏邻接矩阵
+        # 论文注释：masked_adj 是稀疏邻接矩阵，用于记录忽略了样本后，有哪些节点是相连的
         masked_adj = SparseTensor.from_edge_index(edge2keep.t(), sparse_sizes=(data['num_nodes'], data['num_nodes'])).to_device(device)
         masked_adj = masked_adj.to_symmetric()
         masked_adj = masked_adj.to_torch_sparse_coo_tensor().coalesce().bool().int()
@@ -63,27 +63,30 @@ def train_epoch(model, score_func, data, optimizer, args, device):
             adjt_mask[perm] = 1
         else:
             masked_adjt = None
-
+        print("model 1")
         h = model(edges, adj_prop=masked_adjt, adj_mask=masked_adj)
+        print("model 2")
         pos_out = score_func(h)
         pos_loss = -torch.log(pos_out + 1e-6).mean()
 
         # Just do some trivial random sampling for negative samples
         neg_edges = torch.randint(0, data['num_nodes'], (edges.size(0), edges.size(1) * args.num_negative), dtype=torch.long, device=h.device)
-        
+        print("model 3")
         h = model(neg_edges)
+        print("model 4")
         neg_out = score_func(h)
         neg_loss = -torch.log(1 - neg_out + 1e-6).mean()
 
         loss = pos_loss + neg_loss
         loss.backward()
+        print("model 5")
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         torch.nn.utils.clip_grad_norm_(score_func.parameters(), 1.0)
 
         optimizer.step()
         optimizer.zero_grad()
-
+        print("model 6")
         num_examples = pos_out.size(0)
         total_loss += loss.item() * num_examples
         total_examples += num_examples   

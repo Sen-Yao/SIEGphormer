@@ -3,6 +3,7 @@ import torch
 import numpy as np
 from torch_sparse import SparseTensor
 from torch.nn.init import xavier_uniform_
+import scipy.sparse as sp
 
 import torch_geometric.transforms as T
 from torch_geometric.utils import to_undirected, degree
@@ -11,6 +12,7 @@ import joblib  # Make ogb loads faster...idk
 from ogb.linkproppred import PygLinkPropPredDataset
 
 from util.calc_ppr_scores import get_ppr
+from util.utils import torch_sparse_tensor_to_sparse_mx, sparse_mx_to_torch_sparse_tensor
 
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "dataset")
@@ -84,7 +86,35 @@ def read_data_ogb(args, device):
     
     data_obj['adj_t'] = SparseTensor.from_edge_index(edge_index, edge_weight.squeeze(-1), [data.num_nodes, data.num_nodes]).to(device)
 
+    # Start Norm
+    if args.mat_prop > 0:
+        print("Getting Normalized Adj...")
+        # 按照原文创建 torch_Sparse 类型
+        adj = SparseTensor.from_edge_index(edge_index, edge_weight.squeeze(-1), [data.num_nodes, data.num_nodes])
+        # 转为 torch.sparse coo 类型
+        adj = adj.to_torch_sparse_coo_tensor()
+        # 再变成 scipy 稀疏矩阵
+        adj = torch_sparse_tensor_to_sparse_mx(adj)
+        adj = adj = adj + sp.eye(adj.shape[0])
+        D1 = np.array(adj.sum(axis=1))**(-0.5)
+        D2 = np.array(adj.sum(axis=0))**(-0.5)
+        D1 = sp.diags(D1[:, 0], format='csr')
+        D2 = sp.diags(D2[0, :], format='csr')
+        adj = sparse_mx_to_torch_sparse_tensor(adj).to(device)
+        print("Done!")
+        # ------ 下为直接对 torch.sparse 稀疏矩阵做归一化的代码，不确定正确性 ------
+        # D1 = adj.sum(dim=1).to_dense().pow(-0.5)  # 计算 D1
+        # D2 = adj.sum(dim=0).to_dense().pow(-0.5)  # 计算 D2
+        # D1_sparse = SparseTensor.spdiags(D1)
+        # D2_sparse = SparseTensor.spdiags(D2)
+        # A = adj.matmul(D1_sparse)
+        # A = D2_sparse.matmul(A)
+        # -------------------------------------------------------------------
+        data_obj['norm_adj'] = adj
+
     # Needed since directed graph
+    # 林子垚：因为 "ogbl-citation2" 是有向图，所以需要单独处理。具体来说，需要通过 to_symmetric 转为无向图，然后用 coalesce 合成重复边。此时成为了为无向图
+    # adj_mask 表示图中节点之间的连接关系，to_torch_sparse_coo_tensor 是一种稀疏格式
     if args.data_name == 'ogbl-citation2': 
         data_obj['adj_t'] = data_obj['adj_t'].to_symmetric().coalesce()
         data_obj['adj_mask'] = data_obj['adj_t'].to_symmetric().to_torch_sparse_coo_tensor()
@@ -92,6 +122,7 @@ def read_data_ogb(args, device):
         data_obj['adj_mask'] = data_obj['adj_t'].to_symmetric().to_torch_sparse_coo_tensor()        
     
     # Don't use edge weight. Only 0/1. Not needed for masking
+    # 林子垚：将掩码转换为布尔类型，表示连接的存在与否
     data_obj['adj_mask'] = data_obj['adj_mask'].coalesce().bool().int()
 
     if args.use_val_in_test:

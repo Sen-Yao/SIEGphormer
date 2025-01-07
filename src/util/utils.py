@@ -7,6 +7,8 @@ import random
 import logging
 import numpy as np
 
+import scipy.sparse as sp
+
 
 def init_seed(seed=42):
     np.random.seed(seed)
@@ -172,25 +174,24 @@ def rename_best_saved(logger, model_save_name, eval_steps, rand_split=False):
 
         os.rename(existing_name, new_name)
 
-def re_features(adj, features, K):
-    #传播之后的特征矩阵,size= (N, 1, K+1, d )
-    nodes_features = torch.empty(features.shape[0], 1, K+1, features.shape[1])
+def sparse_mx_to_torch_sparse_tensor(sparse_mx):
+    """Convert a scipy sparse matrix to a torch sparse tensor."""
+    sparse_mx = sparse_mx.tocoo().astype(np.float32)
+    indices = torch.from_numpy(
+        np.vstack((sparse_mx.row, sparse_mx.col)).astype(np.int64))
+    values = torch.from_numpy(sparse_mx.data)
+    shape = torch.Size(sparse_mx.shape)
+    return torch.sparse.FloatTensor(indices, values, shape)
 
-    for i in range(features.shape[0]):
+def torch_sparse_tensor_to_sparse_mx(torch_sparse):
+    """Convert a torch sparse tensor to a scipy sparse matrix."""
+    device = torch_sparse.device
+    torch_sparse = torch_sparse.to("cpu")
+    m_index = torch_sparse._indices().numpy()
+    row = m_index[0]
+    col = m_index[1]
+    data = torch_sparse._values().numpy()
 
-        nodes_features[i, 0, 0, :] = features[i]
+    sp_matrix = sp.coo_matrix((data, (row, col)), shape=(torch_sparse.size()[0], torch_sparse.size()[1]))
 
-    x = features + torch.zeros_like(features)
-
-    for i in range(K):
-
-        x = torch.matmul(adj, x)
-
-        for index in range(features.shape[0]):
-
-            nodes_features[index, 0, i + 1, :] = x[index]        
-
-    nodes_features = nodes_features.squeeze()
-
-
-    return nodes_features
+    return sp_matrix

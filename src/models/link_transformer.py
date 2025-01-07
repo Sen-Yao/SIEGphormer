@@ -2,13 +2,18 @@ import math
 import torch
 import torch.nn as nn
 from torch_scatter import scatter 
+import scipy.sparse as sp
+from torch_sparse import SparseTensor
 from torch.nn.init import uniform_
 import numpy as np 
 
+import time
 
 from models.other_models import *
 from modules.node_encoder import NodeEncoder
 from modules.layers import LinkTransformerLayer
+
+from util.utils import torch_sparse_tensor_to_sparse_mx, sparse_mx_to_torch_sparse_tensor
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -97,6 +102,14 @@ class LinkTransformer(nn.Module):
         torch.Tensor
             BS x self.dim
         """
+        # 林子垚：
+        # batch 是当前 batch 传入的那些需要进行预测的边。
+        # adj_prop 仅在 mask_input 时生效，只有 Pubmed 数据集有此设置，否则为 None
+        # adj_mask 是掩码的稀疏邻接矩阵，用于记录忽略了样本后，有哪些节点是相连的
+        # test_set 表示当前为测试集
+        # return_weights 为 debug 用
+
+
         batch = batch.to(self.device)
 
         X_node = self.propagate(adj_prop, test_set)
@@ -104,7 +117,13 @@ class LinkTransformer(nn.Module):
         elementwise_edge_feats = self.elementwise_lin(x_i * x_j) # 论文注释: h_a * h_b，但是这里好像加了个线性层？
 
         # 论文注释：att_weights 不重要，作者用来 debug 的
+        # 林子垚：这里添加一个 X=A^kX。
+        # 现在已经知道，X_node 是 MPNN 传播后的节点特征矩阵
 
+        if self.train_args['mat_prop'] > 0:
+            start_time = time.time()  
+            X_node = self.re_features(X_node, self.train_args['mat_prop'])
+            print(f"\nMatrix Propagation time: {time.time() - start_time:.6f} seconds")
 
         pairwise_feats, att_weights = self.calc_pairwise(batch, X_node, test_set, adj_mask=adj_mask, return_weights=return_weights)
         combined_feats = torch.cat((elementwise_edge_feats, pairwise_feats), dim=-1)
@@ -400,6 +419,7 @@ class LinkTransformer(nn.Module):
         """
         Use val_edges in agg when testing and appropriate Tensor in self.data
         """
+        # 林子垚：从数据中读邻接矩阵或者是掩码矩阵
         suffix = "mask" if mask else "t"
         if test_set:
             return self.data[f'full_adj_{suffix}']
@@ -490,3 +510,31 @@ class LinkTransformer(nn.Module):
 
         return src_ix, src_vals, tgt_vals
 
+    def re_features(self, features, K):
+        # 林子垚：
+        # adj：是已经归一化的 torch.sparse 邻接矩阵
+        # features 是节点特征矩阵
+        # K 是传播的过程执行 K 次
+        adj = self.data['norm_adj']
+
+        # nodes_features 是一个空张量
+        nodes_features = torch.empty(features.shape[0], 1, K+1, features.shape[1]).to(self.device)
+
+        for i in range(features.shape[0]):
+
+            nodes_features[i, 0, 0, :] = features[i]
+
+        x = features + torch.zeros_like(features)
+
+        for i in range(K):
+
+            x = torch.matmul(adj, x)
+
+            for index in range(features.shape[0]):
+
+                nodes_features[index, 0, i + 1, :] = x[index]        
+
+        nodes_features = nodes_features.squeeze().to(self.device)
+
+
+        return nodes_features[:, -1, :]  # 选择最后一个时间步
