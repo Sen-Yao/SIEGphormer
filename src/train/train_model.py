@@ -20,7 +20,7 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data
 
 
 
-def train_epoch(model, score_func, data, optimizer, args, device):
+def train_epoch(model, score_func, data, optimizer, args, device, global_logger):
     model.train()
     score_func.train()
     train_pos = data['train_pos'].to(device)
@@ -63,30 +63,23 @@ def train_epoch(model, score_func, data, optimizer, args, device):
             adjt_mask[perm] = 1
         else:
             masked_adjt = None
-        print("model 1")
         h = model(edges, adj_prop=masked_adjt, adj_mask=masked_adj)
-        print("model 2")
         pos_out = score_func(h)
         pos_loss = -torch.log(pos_out + 1e-6).mean()
 
         # Just do some trivial random sampling for negative samples
         neg_edges = torch.randint(0, data['num_nodes'], (edges.size(0), edges.size(1) * args.num_negative), dtype=torch.long, device=h.device)
-        print("model 3")
         h = model(neg_edges)
-        print("model 4")
         neg_out = score_func(h)
         neg_loss = -torch.log(1 - neg_out + 1e-6).mean()
-
         loss = pos_loss + neg_loss
         loss.backward()
-        print("model 5")
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         torch.nn.utils.clip_grad_norm_(score_func.parameters(), 1.0)
 
         optimizer.step()
         optimizer.zero_grad()
-        print("model 6")
         num_examples = pos_out.size(0)
         total_loss += loss.item() * num_examples
         total_examples += num_examples   
@@ -95,7 +88,7 @@ def train_epoch(model, score_func, data, optimizer, args, device):
 
 
 
-def train_loop(args, train_args, data, device, loggers, seed, model_save_name, verbose):
+def train_loop(args, train_args, data, device, loggers, seed, model_save_name, verbose, global_logger):
     """
     Train over N epochs
     """
@@ -104,7 +97,7 @@ def train_loop(args, train_args, data, device, loggers, seed, model_save_name, v
     evaluator_hit = Evaluator(name='ogbl-collab')
     evaluator_mrr = Evaluator(name='ogbl-citation2') if 'MRR' in loggers else None
 
-    model = LinkTransformer(train_args, data, device=device).to(device)
+    model = LinkTransformer(train_args, data, global_logger, device=device).to(device)
     score_func = mlp_score(model.out_dim, model.out_dim, 1, args.pred_layers, train_args['pred_dropout']).to(device)
                         
     optimizer = torch.optim.Adam(list(model.parameters()) + list(score_func.parameters()), lr=train_args['lr'], weight_decay=train_args['weight_decay'])
@@ -116,7 +109,7 @@ def train_loop(args, train_args, data, device, loggers, seed, model_save_name, v
     for epoch in range(1, 1 + args.epochs):
         print(f">>> Epoch {epoch} - {datetime.now().strftime('%H:%M:%S')}\n" if verbose else "", flush=True, end="")
 
-        loss = train_epoch(model, score_func, data, optimizer, args, device)
+        loss = train_epoch(model, score_func, data, optimizer, args, device, global_logger)
         print(f"Epoch {epoch} Loss: {loss:.4f}\n"  if verbose else "", end="")
                     
         if epoch % args.eval_steps == 0:
@@ -151,7 +144,7 @@ def train_loop(args, train_args, data, device, loggers, seed, model_save_name, v
     return best_valid
 
 
-def train_data(args, train_args, data, device, verbose=True):
+def train_data(args, train_args, data, device, global_logger, verbose=True):
     """
     Run over n random seeds
     """
@@ -181,7 +174,7 @@ def train_data(args, train_args, data, device, verbose=True):
         if model_save_name is not None and args.runs > 1:
             run_save_name = model_save_name + f"_seed-{seed+1}"
 
-        best_valid = train_loop(args, train_args, data, device, loggers, seed, run_save_name, verbose)
+        best_valid = train_loop(args, train_args, data, device, loggers, seed, run_save_name, verbose, global_logger)
         best_valid_results.append(best_valid)
 
     for key in loggers.keys():     

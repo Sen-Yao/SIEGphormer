@@ -1,5 +1,6 @@
 import torch
 import argparse
+from datetime import datetime
 from collections import defaultdict
 
 import joblib  # Make ogb loads faster...idk
@@ -155,11 +156,16 @@ def run_model(cmd_args):
     """
     device = torch.device(f'cuda:{cmd_args.device}' if torch.cuda.is_available() else 'cpu')
     # device = "cpu"  # DEBUG
+    logger_path = os.getcwd()
+    current_time = datetime.now().strftime('%Y-%m-%d-%H%M%S')
+    logger_path = os.path.join(logger_path, 'logs', f'{current_time}.txt')
+    os.makedirs(os.path.dirname(logger_path), exist_ok=True)
+    global_logger =  Logger(0, str(logger_path))
 
     if cmd_args.data_name.lower() in ['cora', 'citeseer', 'pubmed', 'chameleon', 'squirrel']:
         data = read_data_planetoid(cmd_args, device)
     else:
-        data = read_data_ogb(cmd_args, device)
+        data = read_data_ogb(cmd_args, global_logger, device)
 
     if cmd_args.data_name =='ogbl-collab':
         cmd_args.metric = 'Hits@50'
@@ -205,7 +211,8 @@ def run_model(cmd_args):
 
         'mat_prop': cmd_args.mat_prop
     }
-    train_data(cmd_args, args, data, device, verbose = not cmd_args.non_verbose)
+    global_logger.save_args(cmd_args, args)
+    train_data(cmd_args, args, data, device, global_logger, verbose = not cmd_args.non_verbose)
 
 
 

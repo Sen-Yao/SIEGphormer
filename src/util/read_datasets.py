@@ -19,7 +19,7 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..",
 HEART_DIR = os.path.join(DATA_DIR, "heart")
 
 
-def read_data_ogb(args, device):
+def read_data_ogb(args, global_logger, device):
     """
     Read data for OGB datasets
     """
@@ -87,11 +87,11 @@ def read_data_ogb(args, device):
     data_obj['adj_t'] = SparseTensor.from_edge_index(edge_index, edge_weight.squeeze(-1), [data.num_nodes, data.num_nodes]).to(device)
 
     # Start Norm
-    if args.mat_prop > 0:
+    if args.mat_prop >= 0:
         print("Getting Normalized Adj...")
         # 按照原文创建 torch_Sparse 类型
         adj = SparseTensor.from_edge_index(edge_index, edge_weight.squeeze(-1), [data.num_nodes, data.num_nodes])
-        # 转为 torch.sparse coo 类型
+        # 转为 torch.sparse coo 类型（参见 torch_Sparse 的 GitHub 相关代码）
         adj = adj.to_torch_sparse_coo_tensor()
         # 再变成 scipy 稀疏矩阵
         adj = torch_sparse_tensor_to_sparse_mx(adj)
@@ -100,16 +100,11 @@ def read_data_ogb(args, device):
         D2 = np.array(adj.sum(axis=0))**(-0.5)
         D1 = sp.diags(D1[:, 0], format='csr')
         D2 = sp.diags(D2[0, :], format='csr')
-        adj = sparse_mx_to_torch_sparse_tensor(adj).to(device)
+        A = adj.dot(D1)
+        A = D2.dot(A)
+        adj = sparse_mx_to_torch_sparse_tensor(A).to(device)
         print("Done!")
-        # ------ 下为直接对 torch.sparse 稀疏矩阵做归一化的代码，不确定正确性 ------
-        # D1 = adj.sum(dim=1).to_dense().pow(-0.5)  # 计算 D1
-        # D2 = adj.sum(dim=0).to_dense().pow(-0.5)  # 计算 D2
-        # D1_sparse = SparseTensor.spdiags(D1)
-        # D2_sparse = SparseTensor.spdiags(D2)
-        # A = adj.matmul(D1_sparse)
-        # A = D2_sparse.matmul(A)
-        # -------------------------------------------------------------------
+
         data_obj['norm_adj'] = adj
 
     # Needed since directed graph

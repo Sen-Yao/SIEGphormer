@@ -9,6 +9,8 @@ import numpy as np
 
 import scipy.sparse as sp
 
+from datetime import datetime
+
 
 def init_seed(seed=42):
     np.random.seed(seed)
@@ -80,14 +82,16 @@ def get_logger(name, log_dir, config_dir):
 
 
 class Logger(object):
-    def __init__(self, runs, info=None):
+    def __init__(self, runs, log_path=None, info=None):
         self.info = info
         self.results = [[] for _ in range(runs)]
+        self.log_path = log_path
 
     def add_result(self, run, result):
         assert len(result) == 3
         assert run >= 0 and run < len(self.results)
         self.results[run].append(result)
+        self.write_down(result)
 
 
     def get_best_epochs(self, eval_steps, run=None):
@@ -152,7 +156,20 @@ class Logger(object):
 
             # return best_valid, best_valid_mean, mean_list, var_list
             return mean_list, var_list
-
+    
+    def save_args(self, cmd_args, args):
+        text = "\n\nTraining arguments:\n"
+        for arg_name, value in args.items():
+            text = text + str(arg_name) + ": " + str(value) + "\n"
+        self.write_down(text)
+    def write_down(self, text):
+        
+        if self.log_path is not None:
+            with open(self.log_path, 'a', encoding='utf-8') as file:
+                current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                text = current_time + ': ' + text
+                print(text)
+                file.write(text + '\n')
 
 
 def rename_best_saved(logger, model_save_name, eval_steps, rand_split=False):

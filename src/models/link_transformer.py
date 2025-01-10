@@ -28,12 +28,14 @@ class LinkTransformer(nn.Module):
         self,
         train_args,
         data,
+        global_logger,
         device="cuda"
     ):
         super().__init__()
         
         self.train_args = train_args
         self.data = data
+        self.global_logger = global_logger
         self.device = device
 
         # PPR Thresholds
@@ -120,10 +122,7 @@ class LinkTransformer(nn.Module):
         # 林子垚：这里添加一个 X=A^kX。
         # 现在已经知道，X_node 是 MPNN 传播后的节点特征矩阵
 
-        if self.train_args['mat_prop'] > 0:
-            start_time = time.time()  
-            X_node = self.re_features(X_node, self.train_args['mat_prop'])
-            print(f"\nMatrix Propagation time: {time.time() - start_time:.6f} seconds")
+        X_node = self.re_features(X_node, self.train_args['mat_prop'])
 
         pairwise_feats, att_weights = self.calc_pairwise(batch, X_node, test_set, adj_mask=adj_mask, return_weights=return_weights)
         combined_feats = torch.cat((elementwise_edge_feats, pairwise_feats), dim=-1)
@@ -518,11 +517,11 @@ class LinkTransformer(nn.Module):
         adj = self.data['norm_adj']
 
         # nodes_features 是一个空张量
-        nodes_features = torch.empty(features.shape[0], 1, K+1, features.shape[1]).to(self.device)
+        # nodes_features = torch.empty(features.shape[0], 1, K+1, features.shape[1]).to(self.device)
 
-        for i in range(features.shape[0]):
+        # for i in range(features.shape[0]):
 
-            nodes_features[i, 0, 0, :] = features[i]
+            # nodes_features[i, 0, 0, :] = features[i]
 
         x = features + torch.zeros_like(features)
 
@@ -530,11 +529,9 @@ class LinkTransformer(nn.Module):
 
             x = torch.matmul(adj, x)
 
-            for index in range(features.shape[0]):
+            #for index in range(features.shape[0]):
 
-                nodes_features[index, 0, i + 1, :] = x[index]        
+                # nodes_features[index, 0, i + 1, :] = x[index]        
+        # nodes_features = nodes_features.squeeze()
 
-        nodes_features = nodes_features.squeeze().to(self.device)
-
-
-        return nodes_features[:, -1, :]  # 选择最后一个时间步
+        return x

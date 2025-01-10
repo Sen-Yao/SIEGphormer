@@ -1,4 +1,5 @@
 dataset/
+logs/
 nested/
 tune_ogb.py
 att_scores/
