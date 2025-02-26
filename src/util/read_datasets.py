@@ -254,6 +254,27 @@ def read_data_planetoid(args, device):
     data['adj_t'] = SparseTensor.from_edge_index(edge_index, edge_weight, [num_nodes, num_nodes]).to(device)
     data['full_adj_t'] = data['adj_t'].to(device)
 
+    # Start Norm
+    if args.mat_prop >= 0:
+        print("Getting Normalized Adj...")
+        # 按照原文创建 torch_Sparse 类型
+        adj = SparseTensor.from_edge_index(edge_index, edge_weight.squeeze(-1), [num_nodes, num_nodes]).to(device)
+        # 转为 torch.sparse coo 类型（参见 torch_Sparse 的 GitHub 相关代码）
+        adj = adj.to_torch_sparse_coo_tensor()
+        # 再变成 scipy 稀疏矩阵
+        adj = torch_sparse_tensor_to_sparse_mx(adj)
+        adj = adj = adj + sp.eye(adj.shape[0])
+        D1 = np.array(adj.sum(axis=1))**(-0.5)
+        D2 = np.array(adj.sum(axis=0))**(-0.5)
+        D1 = sp.diags(D1[:, 0], format='csr')
+        D2 = sp.diags(D2[0, :], format='csr')
+        A = adj.dot(D1)
+        A = D2.dot(A)
+        adj = sparse_mx_to_torch_sparse_tensor(A).to(device)
+        print("Done!")
+
+        data['norm_adj'] = adj
+
     data['adj_mask'] = data['adj_t'].to_torch_sparse_coo_tensor()
     data['full_adj_mask'] = data['adj_mask'] = data['adj_mask'].coalesce()
 

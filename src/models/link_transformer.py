@@ -121,8 +121,11 @@ class LinkTransformer(nn.Module):
         # 论文注释：att_weights 不重要，作者用来 debug 的
         # 林子垚：这里添加一个 X=A^kX。
         # 现在已经知道，X_node 是 MPNN 传播后的节点特征矩阵
-
+        # start_time = time.time()
+        # self.global_logger.write_down("Before:" + str(X_node))
         X_node = self.re_features(X_node, self.train_args['mat_prop'])
+        # self.global_logger.write_down("After:" + str(X_node))
+        # self.global_logger.write_down("prop time =" + str(time.time() - start_time))
 
         pairwise_feats, att_weights = self.calc_pairwise(batch, X_node, test_set, adj_mask=adj_mask, return_weights=return_weights)
         combined_feats = torch.cat((elementwise_edge_feats, pairwise_feats), dim=-1)
@@ -527,8 +530,7 @@ class LinkTransformer(nn.Module):
 
         for i in range(K):
 
-            x = torch.matmul(adj, x)
-
+            x = torch.sparse.mm(adj, x)
             #for index in range(features.shape[0]):
 
                 # nodes_features[index, 0, i + 1, :] = x[index]        
