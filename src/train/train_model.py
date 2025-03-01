@@ -109,20 +109,23 @@ def train_loop(args, train_args, data, device, loggers, seed, model_save_name, v
         print(f">>> Epoch {epoch} - {datetime.now().strftime('%H:%M:%S')}")
 
         loss = train_epoch(model, score_func, data, optimizer, args, device, global_logger)
-        global_logger.write_down(f"Epoch {epoch} Loss: {loss:.4f}")   
+        # global_logger.write_down(f"Epoch {epoch} Loss: {loss:.4f}")   
         if epoch % args.eval_steps == 0:
-            global_logger.write_down("Evaluating model...")
+            # global_logger.write_down("Evaluating model...")
             
             if "citation" not in args.data_name.lower() or args.heart:
                 results_rank = test(model, score_func, data, evaluator_hit, evaluator_mrr, args.test_batch_size, k_list, heart=args.heart)
             else:
                 results_rank = test_citation2(model, score_func, data, evaluator_hit, evaluator_mrr, args.test_batch_size)
 
-            global_logger.write_down(f"Epoch {epoch} Results:\n-----------------")
+            global_logger.write_down(f"Epoch {epoch} Results:    ")
             for key, result in results_rank.items():
                 loggers[key].add_result(seed, result)
                 if args.metric == key:
                     global_logger.write_down(f"  {key} = {result}")
+                if args.data_name == "cora":
+                    if epoch in {5, 10, 25, 50, 100}:
+                        global_logger.write_down(f"---------------------  {key} = {result}---------------------")
 
             best_valid_current = torch.tensor(loggers[eval_metric].results[seed])[:, 1].max()
 

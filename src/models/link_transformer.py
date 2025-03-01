@@ -45,6 +45,7 @@ class LinkTransformer(nn.Module):
 
         # Allows for easier way to know if we need to ignore some set of nodes
         # Also allows us to be more efficient
+        # 根据超参数，选择此时模型的「mask」
         if self.thresh_non1hop == 1 and self.thresh_1hop == 1:
             self.mask = "cn"
         elif self.thresh_non1hop == 1 and self.thresh_1hop < 1:
@@ -121,12 +122,9 @@ class LinkTransformer(nn.Module):
         # 论文注释：att_weights 不重要，作者用来 debug 的
         # 林子垚：这里添加一个 X=A^kX。
         # 现在已经知道，X_node 是 MPNN 传播后的节点特征矩阵
-        # start_time = time.time()
-        # self.global_logger.write_down("Before:" + str(X_node))
         X_node = self.re_features(X_node, self.train_args['mat_prop'])
-        # self.global_logger.write_down("After:" + str(X_node))
-        # self.global_logger.write_down("prop time =" + str(time.time() - start_time))
 
+        # 计算节点对的那些相关信息
         pairwise_feats, att_weights = self.calc_pairwise(batch, X_node, test_set, adj_mask=adj_mask, return_weights=return_weights)
         combined_feats = torch.cat((elementwise_edge_feats, pairwise_feats), dim=-1)
 
@@ -166,7 +164,10 @@ class LinkTransformer(nn.Module):
         torch.Tensor
             BS x self.dim
         """
+        # 计算节点对的那些相关信息
+        # 提取目标节点对的 feat
         k_i, k_j = X_node[batch[0]], X_node[batch[1]]
+        # 拼接在一起
         pairwise_feats = torch.cat((k_i, k_j), dim=-1)
 
 
@@ -216,7 +217,7 @@ class LinkTransformer(nn.Module):
         torch.Tensor
             Concatenated encodings for cn and 1-hop
         """
-        # 论文注释：这里就是把每个节点的 ppr(a,u) 和 ppr(b,u) 拼接起来给 MLP，ppr_encoder_cn 是一个 MLP，下同。
+        # 论文注释：这里就是把每个节点的 ppr(a,u) 和 ppr(b,u) 拼接起来给 MLP，ppr_encoder_cn 是一个 MLP，下同。输出结果的 cn_a 就是论文里的 rpe(a,u)
         cn_a = self.ppr_encoder_cn(torch.stack((cn_info[1], cn_info[2])).t())
         cn_b = self.ppr_encoder_cn(torch.stack((cn_info[2], cn_info[1])).t())
         # 论文注释，这里就是保证顺序不变性的那个
@@ -255,6 +256,8 @@ class LinkTransformer(nn.Module):
         """
         if adj is None:
             adj = self.get_adj(test_set, mask=True)
+
+        # batch[0] 和 batch[1] 是目标节点对的下标，下面通过 index_select，借助邻接矩阵，找出所有与目标节点 a 或 b 有连接的那些节点的下标，得到一个长度为节点个数的向量，表示了各个节点
         
         src_adj = torch.index_select(adj, 0, batch[0])
         tgt_adj = torch.index_select(adj, 0, batch[1])

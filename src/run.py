@@ -166,7 +166,8 @@ def run_model(cmd_args):
         data = read_data_planetoid(cmd_args, device)
     else:
         data = read_data_ogb(cmd_args, global_logger, device)
-    
+    print(data.keys())
+
     if cmd_args.data_name =='ogbl-collab':
         cmd_args.metric = 'Hits@50'
         gcn_cache = False
