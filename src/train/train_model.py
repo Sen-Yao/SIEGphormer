@@ -76,9 +76,10 @@ def train_epoch(model, score_func, data, optimizer, args, device, global_logger)
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         torch.nn.utils.clip_grad_norm_(score_func.parameters(), 1.0)
-
+        # print("Before:", model.alpha.data)
         optimizer.step()
         optimizer.zero_grad()
+        # print("After:", model.alpha.data)
         num_examples = pos_out.size(0)
         total_loss += loss.item() * num_examples
         total_examples += num_examples   

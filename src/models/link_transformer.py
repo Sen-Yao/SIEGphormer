@@ -88,6 +88,17 @@ class LinkTransformer(nn.Module):
         pairwise_dim = self.dim * train_args['num_heads'] + count_dim
         self.pairwise_lin = MLP(2, pairwise_dim, pairwise_dim, self.dim)  
 
+        # 矩阵传播用
+        self.K = self.train_args['mat_prop']  # 从参数中获取 K 值
+        self.alpha = nn.Parameter(torch.ones(self.K+1)/(self.K+1))  # 初始化为均匀权重
+        
+        # 把输入矩阵做 MLP 再传播
+        self.feature_proj = nn.Sequential(
+            nn.Linear(data['x'].shape[1], self.dim),
+            nn.LayerNorm(self.dim),
+            nn.ReLU()
+        )
+
 
     def forward(self, batch, adj_prop=None, adj_mask=None, test_set=False, return_weights=False):
         """
@@ -115,14 +126,22 @@ class LinkTransformer(nn.Module):
 
         batch = batch.to(self.device)
 
-        X_node = self.propagate(adj_prop, test_set)
+        # # X_node = self.propagate(adj_prop, test_set)
+        # 原本的节点特征通过上面的传播得到，现在直接读数据
+        
+        X_node = self.data['x']
+        # print(X_node.shape)
+        X_node = self.re_features(X_node, self.K)
+        X_node = self.gnn_norm(X_node)
+        # print(X_node.shape)
+        
         x_i, x_j = X_node[batch[0]], X_node[batch[1]]
         elementwise_edge_feats = self.elementwise_lin(x_i * x_j) # 论文注释: h_a * h_b，但是这里好像加了个线性层？
 
         # 论文注释：att_weights 不重要，作者用来 debug 的
         # 林子垚：这里添加一个 X=A^kX。
         # 现在已经知道，X_node 是 MPNN 传播后的节点特征矩阵
-        X_node = self.re_features(X_node, self.train_args['mat_prop'])
+        
 
         # 计算节点对的那些相关信息
         pairwise_feats, att_weights = self.calc_pairwise(batch, X_node, test_set, adj_mask=adj_mask, return_weights=return_weights)
@@ -517,26 +536,27 @@ class LinkTransformer(nn.Module):
 
     def re_features(self, features, K):
         # 林子垚：
-        # adj：是已经归一化的 torch.sparse 邻接矩阵
+        
         # features 是节点特征矩阵
         # K 是传播的过程执行 K 次
+
+        features = self.feature_proj(features)
+
+        # adj：是已经归一化的 torch.sparse 邻接矩阵
         adj = self.data['norm_adj']
 
-        # nodes_features 是一个空张量
-        # nodes_features = torch.empty(features.shape[0], 1, K+1, features.shape[1]).to(self.device)
-
-        # for i in range(features.shape[0]):
-
-            # nodes_features[i, 0, 0, :] = features[i]
-
-        x = features + torch.zeros_like(features)
-
-        for i in range(K):
-
+        # nodes_features 是一个空张量，用于存储每次邻接矩阵传播的结果
+        # 第 0 维度为节点 index，第 1 维度为 1，第 2 维度为传播的次数，第 3 维度为节点特征
+        nodes_features = [features]
+        x = features.clone()
+        for _ in range(K):
             x = torch.sparse.mm(adj, x)
-            #for index in range(features.shape[0]):
+            nodes_features.append(x)
+        nodes_features = torch.stack(nodes_features, dim=1).unsqueeze(1)
+                
+        # 加权求和返回 
+        alpha = self.alpha.view(1, 1, -1, 1)
+        weighted_features = (nodes_features * alpha.softmax(dim=2))
+        weighted_features = weighted_features.sum(dim=2).squeeze(1)
 
-                # nodes_features[index, 0, i + 1, :] = x[index]        
-        # nodes_features = nodes_features.squeeze()
-
-        return x
+        return weighted_features

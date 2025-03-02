@@ -210,7 +210,8 @@ def run_model(cmd_args):
         "thresh_cn": cmd_args.thresh_cn,
         "thresh_non1hop": cmd_args.thresh_non1hop,
 
-        'mat_prop': cmd_args.mat_prop
+        'mat_prop': cmd_args.mat_prop,
+        'branch': "APPNP"
     }
     global_logger.save_args(cmd_args, args)
     train_data(cmd_args, args, data, device, global_logger, verbose = not cmd_args.non_verbose)
