@@ -138,6 +138,9 @@ def train_loop(args, train_args, data, device, loggers, seed, model_save_name, v
                 kill_cnt += 1
                 
                 if kill_cnt > args.kill_cnt: 
+                    if verbose:
+                        global_logger.writedown("Early Stop!")
+                        global_logger.write_down(f"---------------------  Epoch {epoch}, {key} = {result}---------------------")
                     break
                     
         scheduler.step()
