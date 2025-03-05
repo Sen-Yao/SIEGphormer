@@ -18,6 +18,7 @@ def save_test_att(cmd_args):
     """
     Save test attention by for each seed
     """
+    k_list = [20, 50, 100]
     device = torch.device(f'cuda:{cmd_args.device}' if torch.cuda.is_available() else 'cpu')
 
     if cmd_args.data_name.lower() in ['cora', 'citeseer', 'pubmed']:
@@ -214,7 +215,8 @@ def run_model(cmd_args):
         'branch': "APPNP"
     }
     global_logger.save_args(cmd_args, args)
-    train_data(cmd_args, args, data, device, global_logger, verbose = not cmd_args.non_verbose)
+    best_mean, performance1, performance2 = train_data(cmd_args, args, data, device, global_logger, verbose = not cmd_args.non_verbose)
+
 
 
 

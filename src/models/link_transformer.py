@@ -90,13 +90,13 @@ class LinkTransformer(nn.Module):
 
         # 矩阵传播用
         self.K = self.train_args['mat_prop']  # 从参数中获取 K 值
-        self.alpha = nn.Parameter(torch.ones(self.K+1)/(self.K+1))  # 初始化为均匀权重
+        # self.alpha = nn.Parameter(torch.ones(self.K+1)/(self.K+1))  # 初始化为均匀权重
         
         # 把输入矩阵做 MLP 再传播
         self.feature_proj = nn.Sequential(
-            nn.Linear(data['x'].shape[1], self.dim),
-            nn.LayerNorm(self.dim),
-            nn.ReLU()
+            nn.Linear(data['x'].shape[1], self.dim)
+            # nn.LayerNorm(self.dim),
+            # nn.ReLU()
         )
 
 
@@ -132,7 +132,7 @@ class LinkTransformer(nn.Module):
         X_node = self.data['x']
         # print(X_node.shape)
         X_node = self.re_features(X_node, self.K)
-        X_node = self.gnn_norm(X_node)
+        # X_node = self.gnn_norm(X_node)
         # print(X_node.shape)
         
         x_i, x_j = X_node[batch[0]], X_node[batch[1]]
@@ -546,17 +546,20 @@ class LinkTransformer(nn.Module):
         adj = self.data['norm_adj']
 
         # nodes_features 是一个空张量，用于存储每次邻接矩阵传播的结果
-        # 第 0 维度为节点 index，第 1 维度为 1，第 2 维度为传播的次数，第 3 维度为节点特征
         nodes_features = [features]
         x = features.clone()
         for _ in range(K):
             x = torch.sparse.mm(adj, x)
             nodes_features.append(x)
         nodes_features = torch.stack(nodes_features, dim=1).unsqueeze(1)
+
+        alpha = 0.1
+
+        weighted_features = nodes_features[:, 0, -1, :] * (1-alpha) + features * alpha
                 
         # 加权求和返回 
-        alpha = self.alpha.view(1, 1, -1, 1)
-        weighted_features = (nodes_features * alpha.softmax(dim=2))
-        weighted_features = weighted_features.sum(dim=2).squeeze(1)
+        # alpha = self.alpha.view(1, 1, -1, 1)
+        # weighted_features = (nodes_features * alpha.softmax(dim=2))
+        # weighted_features = weighted_features.sum(dim=2).squeeze(1)
 
         return weighted_features

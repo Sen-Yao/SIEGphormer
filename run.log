@@ -1,0 +1,35 @@
+nohup: ignoring input
+# of nodes in cora is:  2708
+Getting Normalized Adj...
+Done!
+PPR matrix exists. Loading from file...
+dict_keys(['dataset', 'edge_index', 'num_nodes', 'train_pos', 'train_pos_val', 'valid_pos', 'valid_neg', 'test_pos', 'test_neg', 'x', 'adj_t', 'full_adj_t', 'norm_adj', 'adj_mask', 'full_adj_mask', 'degree', 'ppr', 'ppr_test'])
+2025-03-05 10:31:33: 
+
+Training arguments:
+gcn_cache: False
+gnn_layers: 1
+trans_layers: 1
+dim: 128
+num_heads: 1
+lr: 0.005
+weight_decay: 0.0
+decay: 0.975
+dropout: 0.1
+gnn_drop: 0.1
+pred_dropout: 0.1
+att_drop: 0.1
+feat_drop: 0.1
+residual: False
+layer_norm: True
+relu: True
+mask_input: False
+thresh_1hop: 0.01
+thresh_cn: 0.01
+thresh_non1hop: 0.01
+mat_prop: 2
+branch: APPNP
+
+Training over 10 seeds:   0%|          | 0/10 [00:00<?, ?it/s]>>> Epoch 1 - 10:31:33
+
+Epoch:   0%|          | 0/5 [00:00<?, ?it/s][A

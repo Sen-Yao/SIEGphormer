@@ -139,8 +139,8 @@ def train_loop(args, train_args, data, device, loggers, seed, model_save_name, v
                 kill_cnt += 1
                 
                 if kill_cnt > args.kill_cnt: 
-                    if verbose:
-                        global_logger.writedown("Early Stop!")
+                    if True:
+                        global_logger.write_down("Early Stop!")
                         global_logger.write_down(f"---------------------  Epoch {epoch}, {key} = {result}---------------------")
                     break
                     
@@ -187,7 +187,8 @@ def train_data(args, train_args, data, device, global_logger, verbose=True):
             global_logger.write_down(key + "\n" + "-" * len(key))  
             # Both lists. [0] = Train, [1] = Valid, [2] = Test
             best_mean, best_var = loggers[key].print_statistics()
-    
+    global_logger.write_down(f'Highest Valid: {best_mean[1]:.2f} ± {best_valid[1]:.2f}')
+    global_logger.write_down(f'Final Test: {best_mean[2]:.2f} ± {best_valid[2]:.2f}')
     return best_mean[1], f"{best_mean[1]} ± {best_var[1]}", f"{best_mean[2]} ± {best_var[2]}"
 
 
