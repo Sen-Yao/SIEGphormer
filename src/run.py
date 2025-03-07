@@ -212,6 +212,7 @@ def run_model(cmd_args):
         "thresh_non1hop": cmd_args.thresh_non1hop,
 
         'mat_prop': cmd_args.mat_prop,
+        'alpha': cmd_args.alpha,
         'branch': "APPNP"
     }
     global_logger.save_args(cmd_args, args)
@@ -276,6 +277,8 @@ def main():
     parser.add_argument('--thresh-non1hop', type=float, default=1e-2)
 
     parser.add_argument('--mat_prop', type=int, default=2)
+    parser.add_argument('--alpha', type=float, default=0.1)
+
 
     args = parser.parse_args()
 

@@ -90,7 +90,7 @@ class LinkTransformer(nn.Module):
 
         # 矩阵传播用
         self.K = self.train_args['mat_prop']  # 从参数中获取 K 值
-        # self.alpha = nn.Parameter(torch.ones(self.K+1)/(self.K+1))  # 初始化为均匀权重
+        self.alpha = self.train_args['alpha']
         
         # 把输入矩阵做 MLP 再传播
         self.feature_proj = nn.Sequential(
@@ -553,9 +553,8 @@ class LinkTransformer(nn.Module):
             nodes_features.append(x)
         nodes_features = torch.stack(nodes_features, dim=1).unsqueeze(1)
 
-        alpha = 0.1
 
-        weighted_features = nodes_features[:, 0, -1, :] * (1-alpha) + features * alpha
+        weighted_features = nodes_features[:, 0, -1, :] * (1-self.alpha) + features * self.alpha
                 
         # 加权求和返回 
         # alpha = self.alpha.view(1, 1, -1, 1)
