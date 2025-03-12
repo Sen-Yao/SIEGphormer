@@ -1,56 +1,0 @@
-nohup: ignoring input
-# of nodes in cora is:  2708
-Getting Normalized Adj...
-Done!
-PPR matrix exists. Loading from file...
-dict_keys(['dataset', 'edge_index', 'num_nodes', 'train_pos', 'train_pos_val', 'valid_pos', 'valid_neg', 'test_pos', 'test_neg', 'x', 'adj_t', 'full_adj_t', 'norm_adj', 'adj_mask', 'full_adj_mask', 'degree', 'ppr', 'ppr_test'])
-2025-03-07 09:17:46: 
-
-Training arguments:
-gcn_cache: False
-gnn_layers: 1
-trans_layers: 1
-dim: 128
-num_heads: 1
-lr: 0.005
-weight_decay: 0.0
-decay: 0.975
-dropout: 0.1
-gnn_drop: 0.1
-pred_dropout: 0.1
-att_drop: 0.1
-feat_drop: 0.1
-residual: False
-layer_norm: True
-relu: True
-mask_input: False
-thresh_1hop: 0.01
-thresh_cn: 0.01
-thresh_non1hop: 0.01
-mat_prop: 1
-alpha: 0.2
-branch: APPNP
-
-Training over 10 seeds:   0%|          | 0/10 [00:00<?, ?it/s]>>> Epoch 1 - 09:17:47
-
-Epoch:   0%|          | 0/5 [00:00<?, ?it/s][A
-Epoch:  20%|██        | 1/5 [00:37<02:28, 37.09s/it][A
-Epoch:  40%|████      | 2/5 [01:09<01:43, 34.57s/it][A
-Epoch:  60%|██████    | 3/5 [01:42<01:07, 33.62s/it][A
-Epoch:  80%|████████  | 4/5 [02:15<00:33, 33.50s/it][A
-Epoch: 100%|██████████| 5/5 [02:30<00:00, 26.87s/it][AEpoch: 100%|██████████| 5/5 [02:30<00:00, 30.16s/it]
-2025-03-07 09:20:52: Epoch 1 Results:    
-2025-03-07 09:20:52:   MRR = (0.8677394390106201, 0.37511229515075684, 0.24878421425819397)
->>> Epoch 2 - 09:20:52
-
-Epoch:   0%|          | 0/5 [00:00<?, ?it/s][A
-Epoch:  20%|██        | 1/5 [00:33<02:15, 33.98s/it][A
-Epoch:  40%|████      | 2/5 [01:05<01:37, 32.59s/it][A
-Epoch:  60%|██████    | 3/5 [01:37<01:04, 32.30s/it][A
-Epoch:  80%|████████  | 4/5 [02:10<00:32, 32.71s/it][A
-Epoch: 100%|██████████| 5/5 [02:25<00:00, 26.33s/it][AEpoch: 100%|██████████| 5/5 [02:25<00:00, 29.18s/it]
-2025-03-07 09:23:52: Epoch 2 Results:    
-2025-03-07 09:23:52:   MRR = (0.895207941532135, 0.4282708764076233, 0.2837716042995453)
->>> Epoch 3 - 09:23:52
-
-Epoch:   0%|          | 0/5 [00:00<?, ?it/s][A
