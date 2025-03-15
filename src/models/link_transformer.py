@@ -91,7 +91,8 @@ class LinkTransformer(nn.Module):
         # 矩阵传播用
         self.K = self.train_args['mat_prop']  # 从参数中获取 K 值
         self.alpha = self.train_args['alpha']
-        
+        # self.alpha = nn.Parameter(torch.empty(self.K, 1))
+        # nn.init.uniform_(self.alpha, 0, 1/self.K)
         # 把输入矩阵做 MLP 再传播
         self.feature_proj = nn.Sequential(
             nn.Linear(data['x'].shape[1], self.dim)
