@@ -91,8 +91,8 @@ class LinkTransformer(nn.Module):
         # 矩阵传播用
         self.K = self.train_args['mat_prop']  # 从参数中获取 K 值
         self.alpha = self.train_args['alpha']
-        self.alpha = nn.Parameter(torch.empty(self.K, 1))
-        nn.init.uniform_(self.alpha, 0, 1/self.K)
+        self.alpha = nn.Parameter(torch.zeros(self.K + 1))
+
         # 把输入矩阵做 MLP 再传播
         self.feature_proj = nn.Sequential(
             nn.Linear(data['x'].shape[1], self.dim)
@@ -552,14 +552,15 @@ class LinkTransformer(nn.Module):
         for _ in range(K):
             x = torch.sparse.mm(adj, x)
             nodes_features.append(x)
-        nodes_features = torch.stack(nodes_features, dim=1).unsqueeze(1)
+        # nodes_features = torch.stack(nodes_features, dim=1).unsqueeze(1)
+        nodes_features = torch.stack(nodes_features, dim=1)
+        # print(nodes_features.shape)
 
+        # 如果固定权重，用这套：
+        weighted_features = nodes_features[:, 0, -1, :] * (1-self.train_args['alpha']) + features * self.train_args['alpha']
 
-        # weighted_features = nodes_features[:, 0, -1, :] * (1-self.alpha) + features * self.alpha
-                
-        # 加权求和返回 
-        alpha = self.alpha.view(1, 1, -1, 1)
-        weighted_features = (nodes_features * alpha.softmax(dim=2))
-        weighted_features = weighted_features.sum(dim=2).squeeze(1)
+        # 如果动态 alpha，用这套：
+        # weights = torch.softmax(self.alpha, dim=0)
+        # weighted_features = (nodes_features * weights.view(1, -1, 1)).sum(dim=1)
 
         return weighted_features
