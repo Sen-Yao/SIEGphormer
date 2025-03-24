@@ -13,7 +13,7 @@ from models.other_models import *
 from modules.node_encoder import NodeEncoder
 from modules.layers import LinkTransformerLayer
 
-from util.utils import torch_sparse_tensor_to_sparse_mx, sparse_mx_to_torch_sparse_tensor
+from util.utils import torch_sparse_tensor_to_sparse_mx, sparse_mx_to_torch_sparse_tensor, drnl_node_labeling
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -84,9 +84,11 @@ class LinkTransformer(nn.Module):
             count_dim = 4
             self.ppr_encoder_onehop = MLP(2, 2, self.dim, self.dim)
             self.ppr_encoder_non1hop = MLP(2, 2, self.dim, self.dim)
+
+        self.drnl_encoder = MLP(2, 1, self.dim, self.dim)
         
         pairwise_dim = self.dim * train_args['num_heads'] + count_dim
-        self.pairwise_lin = MLP(2, pairwise_dim, pairwise_dim, self.dim)  
+        self.pairwise_lin = MLP(2, pairwise_dim, pairwise_dim, self.dim)          
 
         # 矩阵传播用
         self.K = self.train_args['mat_prop']  # 从参数中获取 K 值
@@ -99,6 +101,9 @@ class LinkTransformer(nn.Module):
             # nn.LayerNorm(self.dim),
             # nn.ReLU()
         )
+
+        self.drnl = torch.zeros((self.train_args['batch_size'], self.data['num_nodes']), device=device)
+        # print("init_drnl", self.drnl.dtype)
 
 
     def forward(self, batch, adj_prop=None, adj_mask=None, test_set=False, return_weights=False):
@@ -118,7 +123,7 @@ class LinkTransformer(nn.Module):
             BS x self.dim
         """
         # 林子垚：
-        # batch 是当前 batch 传入的那些需要进行预测的边。
+        # batch 是当前 batch 传入的那些需要进行预测的边，形状为（2, batch_size), 表示了每个样本的目标节点对下标
         # adj_prop 仅在 mask_input 时生效，只有 Pubmed 数据集有此设置，否则为 None
         # adj_mask 是掩码的稀疏邻接矩阵，用于记录忽略了样本后，有哪些节点是相连的
         # test_set 表示当前为测试集
@@ -127,22 +132,29 @@ class LinkTransformer(nn.Module):
 
         batch = batch.to(self.device)
 
-        # # X_node = self.propagate(adj_prop, test_set)
+        # X_node = self.propagate(adj_prop, test_set)
         # 原本的节点特征通过上面的传播得到，现在直接读数据
         
         X_node = self.data['x']
-        # print(X_node.shape)
         X_node = self.re_features(X_node, self.K)
-        # X_node = self.gnn_norm(X_node)
-        # print(X_node.shape)
+
+        # print("X_node=", X_node.shape)
+
+        # 计算子图掩码
+        # self.subgraph_mask = self.cal_subgraph_mask(batch, test_set, adj_mask)
         
+        # 计算 DRNL
+        
+        if self.train_args['drnl']:
+            self.drnl = drnl_node_labeling(self.data['coo_adj'].tocsr(), batch[0], batch[1])
+            # print("forward", self.drnl.dtype)
+            # drnl 形状为 (batch_size, num_nodes) 的稀疏矩阵
+
+        # batch[0] 为长度为 batch_size 的一个一维向量，表示了这个 batch 所有的目标节点对的 a 节点，同理 batch[1] 表示了 b 节点
         x_i, x_j = X_node[batch[0]], X_node[batch[1]]
         elementwise_edge_feats = self.elementwise_lin(x_i * x_j) # 论文注释: h_a * h_b，但是这里好像加了个线性层？
 
-        # 论文注释：att_weights 不重要，作者用来 debug 的
-        # 林子垚：这里添加一个 X=A^kX。
-        # 现在已经知道，X_node 是 MPNN 传播后的节点特征矩阵
-        
+        # att_weights 不重要，作者用来 debug 的        
 
         # 计算节点对的那些相关信息
         pairwise_feats, att_weights = self.calc_pairwise(batch, X_node, test_set, adj_mask=adj_mask, return_weights=return_weights)
@@ -177,7 +189,6 @@ class LinkTransformer(nn.Module):
         """
         Calculate the pairwise features for the node pairs
 
-        TODO: Remove duplicate code later!!!
 
         Returns:
         -------
@@ -203,15 +214,22 @@ class LinkTransformer(nn.Module):
             pairwise_feats = torch.cat((pairwise_feats, num_cns), dim=-1)
 
         else:
+            # 算出三个级别的子图的相关信息，相互应该不包括
             cn_info, onehop_info, non1hop_info = self.compute_node_mask(batch, test_set, adj_mask)
             
             if non1hop_info is not None:
                 all_mask = torch.cat((cn_info[0], onehop_info[0], non1hop_info[0]), dim=-1)
-                pes = self.get_pos_encodings(cn_info, onehop_info, non1hop_info)
+                batch_idx = all_mask[0, :]
+                node_idx = all_mask[1, :]
+                subg_drnl = self.drnl[batch_idx, node_idx]
+                drnl_info = (all_mask, subg_drnl)
+                pes = self.get_pos_encodings(cn_info, onehop_info, non1hop_info, drnl_info)
             else:
                 all_mask = torch.cat((cn_info[0], onehop_info[0]), dim=-1)
                 pes = self.get_pos_encodings(cn_info, onehop_info)
-
+            # all_mask 是稀疏矩阵形式的子图掩码。包括三个或两个级别的所有节点。
+            # pes 是所谓的位置编码，形状为  (子图规模, self.dim)
+            # print("pes_shape=", pes.shape)
             for l in range(self.num_layers):
                 # 论文注释：这里的 pairwise_feats 是 s(a,b)
                 pairwise_feats, att_weights = self.att_layers[l](all_mask, pairwise_feats, X_node, pes, None, return_weights)
@@ -228,7 +246,7 @@ class LinkTransformer(nn.Module):
 
     
 
-    def get_pos_encodings(self, cn_info, onehop_info=None, non1hop_info=None):
+    def get_pos_encodings(self, cn_info, onehop_info=None, non1hop_info=None, drnl_info=None):
         """
         Ensure symmetric by making `enc = g(a, b) + g(b, a)`
 
@@ -237,8 +255,17 @@ class LinkTransformer(nn.Module):
         torch.Tensor
             Concatenated encodings for cn and 1-hop
         """
-        # 论文注释：这里就是把每个节点的 ppr(a,u) 和 ppr(b,u) 拼接起来给 MLP，ppr_encoder_cn 是一个 MLP，下同。输出结果的 cn_a 就是论文里的 rpe(a,u)
+        # info 就是 compute_node_mask 函数算出来的三个尺度的信息，其中有三个元素
+        # info[0] 是下标的稠密矩阵
+        # info[1] 是 ppr(a,u)， info[2] 是 ppr(b,u)，形状为 (子图节点个数)
+        # 如果是 drnl_info，则只有两个元素
+        
+        # 下面的 torch.stack((cn_info[1], cn_info[2]) 堆叠后形状为 (2, n), 加上 t() 转置为 (n, 2)，对应原文就是 CN 中的每个节点的 ppr(a,u) 和 ppr(b,u) 拼接起来‘
+        # ppr_encoder_cn 是一个 MLP
+        # 出结果的 cn_a 就是论文里的 rpe(a,u)，形状为 (n, self.dim)
+
         cn_a = self.ppr_encoder_cn(torch.stack((cn_info[1], cn_info[2])).t())
+        # print("cn_a", cn_a.shape)
         cn_b = self.ppr_encoder_cn(torch.stack((cn_info[2], cn_info[1])).t())
         # 论文注释，这里就是保证顺序不变性的那个
         cn_pe = cn_a + cn_b
@@ -259,7 +286,13 @@ class LinkTransformer(nn.Module):
         non1hop_b = self.ppr_encoder_non1hop(torch.stack((non1hop_info[2] , non1hop_info[1])).t())
         non1hop_pe = non1hop_a + non1hop_b
 
-        return torch.cat((cn_pe, onehop_pe, non1hop_pe), dim=0)
+        if drnl_info is not None:
+            drnl_pe = self.drnl_encoder(drnl_info[1].unsqueeze(1))
+            rpe_pe = torch.cat((cn_pe, onehop_pe, non1hop_pe), dim=0)
+            # print("drnl_pe", drnl_pe.shape)
+            return torch.cat((drnl_pe, rpe_pe), dim=1)
+        else:
+            return torch.cat((cn_pe, onehop_pe, non1hop_pe), dim=0)
 
 
     def compute_node_mask(self, batch, test_set, adj):
@@ -278,7 +311,7 @@ class LinkTransformer(nn.Module):
             adj = self.get_adj(test_set, mask=True)
 
         # batch[0] 和 batch[1] 是目标节点对的下标，下面通过 index_select，借助邻接矩阵，找出所有与目标节点 a 或 b 有连接的那些节点的下标，得到一个长度为节点个数的向量，表示了各个节点
-        
+        # 此时 src_adj 为与目标节点 a 相连的节点的下标，形状应为 (batchsize, 所有节点个数)，1 为真，0 为假
         src_adj = torch.index_select(adj, 0, batch[0])
         tgt_adj = torch.index_select(adj, 0, batch[1])
 
@@ -287,12 +320,17 @@ class LinkTransformer(nn.Module):
             pair_adj = src_adj * tgt_adj
         else:
             # Equals: {0: ">1-Hop", 1: "1-Hop (Non-CN)", 2: "CN"}
-            pair_adj = src_adj + tgt_adj  
-        
+            pair_adj = src_adj + tgt_adj
+        # 此时 pair_adj 记录了不同类型子图的信息，形状为 (batchsize, 所有节点个数)
+        # pair_adj = self.subgraph_mask
         pair_ix, node_type, src_ppr, tgt_ppr = self.get_ppr_vals(batch, pair_adj, test_set)
+        # pair_ix 形状为 (2, n)，其中每列存储了 ppr 非零节点的二维下标（即 (batchsize, 节点个数)），由两个数字组成，表示了在原来的矩阵中对应的位置
 
+        # 接下来根据 PPR 值做筛选从而选出子图
         cn_filt_cond = (src_ppr >= self.thresh_cn) & (tgt_ppr >= self.thresh_cn)
         onehop_filt_cond = (src_ppr >= self.thresh_1hop) & (tgt_ppr >= self.thresh_1hop)
+        # print("cn_filt_cond", cn_filt_cond.shape)
+        # filt_cond 为筛选后的布尔值，形状为 (n)
     
         if self.mask != "cn":
             filt_cond = torch.where(node_type == 1, onehop_filt_cond, cn_filt_cond)
@@ -300,6 +338,7 @@ class LinkTransformer(nn.Module):
             filt_cond = torch.where(node_type == 0, onehop_filt_cond, cn_filt_cond)
 
         pair_ix, node_type = pair_ix[:, filt_cond], node_type[filt_cond]
+        # print("pair_ix 2 shape=", pair_ix.shape)
         src_ppr, tgt_ppr = src_ppr[filt_cond], tgt_ppr[filt_cond]
 
         # >1-Hop mask is gotten separately
@@ -315,12 +354,17 @@ class LinkTransformer(nn.Module):
         # Separate out CN and 1-Hop
         if self.mask != "cn":
             cn_ind = node_type == 2
+            # print("cn_ind shape=", cn_ind.shape)
             cn_ix, cn_src_ppr, cn_tgt_ppr = pair_ix[:, cn_ind], src_ppr[cn_ind], tgt_ppr[cn_ind]
 
             one_hop_ind = node_type == 1
+            # print("one_hop_ind shape=", one_hop_ind.shape)
             onehop_ix, onehop_src_ppr, onehop_tgt_ppr = pair_ix[:, one_hop_ind], src_ppr[one_hop_ind], tgt_ppr[one_hop_ind]
-
-
+        
+        # 这里的 ix 均为稠密矩阵形式，表示了 batch 和节点下标
+        # print("\n\ncn_in=", cn_ix.shape)
+        # print("onehop_ix", onehop_ix.shape)
+        # print("non1hop_ix", non1hop_ix.shape)
         if self.mask == "cn":
             return (pair_ix, src_ppr, tgt_ppr), None, None
         elif self.mask == "1-hop":
@@ -334,19 +378,42 @@ class LinkTransformer(nn.Module):
         Get the src and tgt ppr vals
 
         `pair_diff_adj` specifies type of nodes we select
+
+        input:
+            batch: 形状为（2, batch_size）的张量。每一行分别表示源节点和目标节点的下标。
+            pair_diff_adj: 形状为（batch_size, 所有节点个数）的张量，用于指定选择节点所属的子图类型。类别如下：
+                - `0`: 表示">1-Hop"的节点
+                - `1`: 表示"1-Hop (Non-CN)"的节点
+                - `2`: 表示"CN"的节点
+            test_set: 布尔值，默认为`False`。用于指示是否使用测试集来计算PPR值。
         """
         # Additional terms for also choosing scores when ppr=0
         # Multiplication removes any values for nodes not in batch
         # Addition then adds offset to ensure we select when ppr=0
         # All selected scores are +1 higher than their true val
+
+        # ppr 矩阵，存储所有节点对的PPR值，形状为 (节点个数, 节点个数) 。
+        # 考虑到对于同一个数据集，不同的链路预测样本不影响 ppr 值，因此这里不需要考虑 batchsize
+        # ppr[i][j]表示从节点i到节点j的PPR值。
         ppr = self.get_ppr(test_set)
+
+        # torch.index_select(ppr, 0, batch[0]) 这一步是从 ppr 这个矩阵选择源节点对应的行，读出对应的数据
+        # 添加偏移量，确保后续能区分 PPR 值为 0 的情况
+        # src_ppr_adj 表示了当前 batch 的每个源节点到其他节点的调整后 PPR 值，同理 tgt_ppr_adj 是目标节点到其他节点的调整后 PPR 值。形状均为 (batchsize, 节点个数)
+        
         src_ppr_adj = torch.index_select(ppr, 0, batch[0]) * pair_diff_adj + pair_diff_adj
         tgt_ppr_adj = torch.index_select(ppr, 0, batch[1]) * pair_diff_adj + pair_diff_adj
 
         # Can now convert ppr scores to dense
+        # 这里有一部分稀疏矩阵转换为稠密矩阵的计算。
+        # ppr_ix 为 src_ppr_adj 中非零元素的坐标构成的矩阵。
+        # 假如图中有 n 个节点到源节点的 ppr 不为零，则 ppr_ix 形状为 (2, n)，其中每列存储了非零节点的二维下标（即 (batchsize, 节点个数)），由两个数字组成，表示了在原来的矩阵中对应的位置
+        # 相应的值则被存进了 src_ppr，为一维向量，长度为 (n)
         ppr_ix  = src_ppr_adj.coalesce().indices()
         src_ppr = src_ppr_adj.coalesce().values()
         tgt_ppr = tgt_ppr_adj.coalesce().values()
+        # print("ppr_ix:", ppr_ix.shape)
+        # print("src_ppr:", src_ppr.shape)
 
         # If one is 0 so is the other
         # NOTE: Should be few to no nodes here
@@ -361,9 +428,13 @@ class LinkTransformer(nn.Module):
         src_ppr = src_ppr[zero_vals]
         tgt_ppr = tgt_ppr[tgt_ppr != 0]
         ppr_ix = ppr_ix[:, zero_vals]
+        # print("src_ppr 2:", src_ppr.shape)
+        # print("ppr_ix 2:", ppr_ix.shape)
 
         pair_diff_adj = pair_diff_adj.coalesce().values()
+        # print("pair_diff_adj 2:", pair_diff_adj.shape)
         pair_diff_adj = pair_diff_adj[src_ppr != 0]
+        # print("pair_diff_adj 3:", pair_diff_adj.shape)
 
         # Remove additional +1 from each ppr val
         src_ppr = (src_ppr - pair_diff_adj) / pair_diff_adj
@@ -557,7 +628,7 @@ class LinkTransformer(nn.Module):
         # print(nodes_features.shape)
 
         # 如果固定权重，用这套：
-        weighted_features = nodes_features[:, 0, -1, :] * (1-self.train_args['alpha']) + features * self.train_args['alpha']
+        weighted_features = nodes_features.unsqueeze(1)[:, 0, -1, :] * (1-self.train_args['alpha']) + features * self.train_args['alpha']
 
         # 如果动态 alpha，用这套：
         # weights = torch.softmax(self.alpha, dim=0)
