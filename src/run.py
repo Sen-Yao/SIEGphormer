@@ -18,6 +18,7 @@ def save_test_att(cmd_args):
     """
     Save test attention by for each seed
     """
+    k_list = [20, 50, 100]
     device = torch.device(f'cuda:{cmd_args.device}' if torch.cuda.is_available() else 'cpu')
 
     if cmd_args.data_name.lower() in ['cora', 'citeseer', 'pubmed']:
@@ -197,6 +198,7 @@ def run_model(cmd_args):
         'lr': cmd_args.lr,
         'weight_decay': cmd_args.l2,
         'decay': cmd_args.decay,
+        'batch_size': cmd_args.batch_size,
         'dropout': cmd_args.dropout,
         'gnn_drop': cmd_args.gnn_drop,
         'pred_dropout': cmd_args.pred_drop,
@@ -210,10 +212,14 @@ def run_model(cmd_args):
         "thresh_cn": cmd_args.thresh_cn,
         "thresh_non1hop": cmd_args.thresh_non1hop,
 
-        'mat_prop': cmd_args.mat_prop
+        'mat_prop': cmd_args.mat_prop,
+        'alpha': cmd_args.alpha,
+        'drnl': cmd_args.drnl,
+        'branch': "APPNP"
     }
     global_logger.save_args(cmd_args, args)
-    train_data(cmd_args, args, data, device, global_logger, verbose = not cmd_args.non_verbose)
+    best_mean, performance1, performance2 = train_data(cmd_args, args, data, device, global_logger, verbose = not cmd_args.non_verbose)
+
 
 
 
@@ -273,6 +279,9 @@ def main():
     parser.add_argument('--thresh-non1hop', type=float, default=1e-2)
 
     parser.add_argument('--mat_prop', type=int, default=2)
+    parser.add_argument('--alpha', type=float, default=0.1)
+    parser.add_argument('--drnl', type=int, default=0)
+
 
     args = parser.parse_args()
 

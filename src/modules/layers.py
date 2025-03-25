@@ -17,6 +17,7 @@ from torch_geometric.nn.inits import glorot, zeros
 class LinkTransformerLayer(nn.Module):
     """
     Layer for models.LinkTransformer
+    应该就是原文计算 s(a,b) 的过程
     """
     def __init__(
         self, 
@@ -120,7 +121,8 @@ class LinkAttention(MessagePassing):
         self.share_weights = share_weights
         self.lin_edge = None  # No edge embedding
 
-        out_dim = 2
+        # 为啥这里是 2
+        out_dim = 3
 
         if node_dim is None:
             node_dim = in_channels * out_dim
@@ -196,20 +198,23 @@ class LinkAttention(MessagePassing):
         x_i: Tensor,    # Edge
         x_j: Tensor,    # Node (Trust me!!!)
         pe_att: Tensor, 
+        # drnl: Tensor,
         deg_enc: Tensor,
         index: Tensor, 
         ptr,
         size_i: Optional[int]
     ):
         H, C = self.heads, self.out_channels
-
+        # print("x_j=", x_j.shape)
+        # print("pe_att=", pe_att.shape)
         if pe_att is not None:
             # 论文注释：x_j 就是 h(a,b,u)= [h_u||rpe(a,b,u)]，只不过这里是对所有节点进行的，维度不一样，下同。
             x_j = torch.cat((x_j, pe_att), dim=-1)
+        # print("x_j 2=", x_j.shape)
 
         # 把 h(a,b,u) 拼接后的结果过一个线性层
         x_j = self.lin_r(x_j).view(-1, H, C)
-        # 论文注释：下面进行的应该就是 GATv2 注意力机制，有对岸看不通
+        # 论文注释：下面进行的应该就是 GATv2 注意力机制，有点看不通
         # e=(a, b) attending to v
         
         # x_a * x_v + x_b * x_v

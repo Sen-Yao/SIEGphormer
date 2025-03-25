@@ -8,6 +8,8 @@ import logging
 import numpy as np
 
 import scipy.sparse as sp
+from scipy.sparse.csgraph import shortest_path
+from collections import deque
 
 from datetime import datetime
 
@@ -212,3 +214,162 @@ def torch_sparse_tensor_to_sparse_mx(torch_sparse):
     sp_matrix = sp.coo_matrix((data, (row, col)), shape=(torch_sparse.size()[0], torch_sparse.size()[1]))
 
     return sp_matrix
+
+
+def drnl_node_labeling(adj, batch_src, batch_dst):
+    """
+    批量计算DRNL节点标签。
+    
+    参数:
+    adj: scipy.sparse.csr_matrix，图的邻接矩阵
+    batch_src: 一维Tensor，批量的源节点索引
+    batch_dst: 一维Tensor，批量的目标节点索引
+    
+    返回:
+    batch_z: (batch_size, num_nodes) 的LongTensor，每个样本的节点标签
+    """
+    device = batch_src.device
+    num_nodes = adj.shape[0]
+    batch_size = batch_src.size(0)
+    batch_z = []
+
+    
+    # 遍历每个样本
+    for i in range(batch_size):
+        src = batch_src[i].item()
+        dst = batch_dst[i].item()
+        
+        # 确保 src <= dst
+        src, dst = (dst, src) if src > dst else (src, dst)
+        
+        # 构建排除src后的邻接矩阵
+        idx_wo_src = list(range(src)) + list(range(src + 1, num_nodes))
+        adj_wo_src = adj[idx_wo_src, :][:, idx_wo_src]
+        
+        # 构建排除dst后的邻接矩阵
+        idx_wo_dst = list(range(dst)) + list(range(dst + 1, num_nodes))
+        adj_wo_dst = adj[idx_wo_dst, :][:, idx_wo_dst]
+        
+        # 计算到src的最短路径（排除dst节点）
+        dist2src = shortest_path(adj_wo_dst, directed=False, unweighted=True, indices=src)
+        dist2src = np.insert(dist2src, dst, 0)  # 插入被排除的dst节点距离为0
+        
+        # 计算到dst的最短路径（排除src节点）
+        # 注意：在排除src后的邻接矩阵中，原dst节点的索引为dst-1（因为src <= dst）
+        dist2dst = shortest_path(adj_wo_src, directed=False, unweighted=True, indices=dst-1)
+        dist2dst = np.insert(dist2dst, src, 0)  # 插入被排除的src节点距离为0
+        
+        # 转换为Tensor
+        dist2src = torch.from_numpy(dist2src).float().to(device)
+        dist2dst = torch.from_numpy(dist2dst).float().to(device)
+        
+        # 计算标签
+        dist = dist2src + dist2dst
+        dist_over_2, dist_mod_2 = torch.div(dist, 2, rounding_mode='floor'), dist % 2
+        
+        z = 1 + torch.min(dist2src, dist2dst)
+        z += dist_over_2 * (dist_over_2 + dist_mod_2 - 1)
+        z[src] = 1.
+        z[dst] = 1.
+        z[torch.isnan(z)] = 0.
+        
+        batch_z.append(z.to(torch.long))
+    
+    # 堆叠结果 (batch_size, num_nodes)
+    return torch.stack(batch_z, dim=0).to(torch.float32)
+
+def drnl_subgraph_labeling(adj, batch_src, batch_dst, subg_mask):
+    """
+    改进后的DRNL标签计算函数，处理子图。
+    
+    参数:
+    adj: scipy.sparse.csr_matrix，图的邻接矩阵
+    batch_src: 一维Tensor，批量的源节点索引
+    batch_dst: 一维Tensor，批量的目标节点索引
+    subg_mask: (2, n)的Tensor，每列表示(batch_idx, node_idx)
+    
+    返回:
+    drnl_value: (n)的LongTensor，每个节点的DRNL值
+    """
+    device = subg_mask.device
+    n = subg_mask.size(1)
+    batch_size = batch_src.size(0)
+    drnl_value = torch.zeros(n, dtype=torch.long, device=device)
+    
+    # 转换为CPU numpy数组以处理稀疏矩阵
+    subg_mask_np = subg_mask.cpu().numpy()
+    batch_indices = subg_mask_np[0]
+    node_indices = subg_mask_np[1]
+    
+    for i in range(batch_size):
+        # 提取当前batch的节点
+        mask = (batch_indices == i)
+        if not np.any(mask):
+            continue
+        
+        nodes_i = node_indices[mask].tolist()
+        src_i = batch_src[i].item()
+        dst_i = batch_dst[i].item()
+        src_i, dst_i = sorted((src_i, dst_i))
+        
+        if src_i not in nodes_i or dst_i not in nodes_i:
+            continue  # 确保源和目标在子图中
+        
+        # 构建子图邻接表
+        node_to_sub = {u: idx for idx, u in enumerate(nodes_i)}
+        sub_size = len(nodes_i)
+        sub_adj = [[] for _ in range(sub_size)]
+        for sub_idx, u in enumerate(nodes_i):
+            neighbors = adj.indices[adj.indptr[u]:adj.indptr[u+1]]
+            for v in neighbors:
+                if v in node_to_sub:
+                    sub_adj[sub_idx].append(node_to_sub[v])
+        
+        # 获取源和目标在子图中的位置
+        src_sub = node_to_sub[src_i]
+        dst_sub = node_to_sub[dst_i]
+        
+        # 计算到src的最短路径（排除dst）
+        d_src = bfs_exclude(sub_adj, src_sub, exclude=dst_sub)
+        # 计算到dst的最短路径（排除src）
+        d_dst = bfs_exclude(sub_adj, dst_sub, exclude=src_sub)
+        
+        # 转换为Tensor并处理不可达节点
+        d_src = torch.tensor(d_src, dtype=torch.float, device=device)
+        d_src[d_src == float('inf')] = torch.nan
+        d_dst = torch.tensor(d_dst, dtype=torch.float, device=device)
+        d_dst[d_dst == float('inf')] = torch.nan
+        
+        # 计算DRNL标签
+        dist = d_src + d_dst
+        dist_over_2 = torch.div(dist, 2, rounding_mode='floor')
+        dist_mod_2 = dist % 2
+        
+        z = 1 + torch.minimum(d_src, d_dst)
+        z += dist_over_2 * (dist_over_2 + dist_mod_2 - 1)
+        z[src_sub] = 1.0
+        z[dst_sub] = 1.0
+        z[torch.isnan(z)] = 0
+        z = z.long()
+        
+        # 填充到结果张量
+        batch_pos = np.where(mask)[0]
+        drnl_value[batch_pos] = z.to(device)
+    
+    return drnl_value.to(torch.float32)
+
+def bfs_exclude(sub_adj, start, exclude):
+    n = len(sub_adj)
+    dist = [float('inf')] * n
+    dist[start] = 0
+    q = deque([start])
+    
+    while q:
+        u = q.popleft()
+        for v in sub_adj[u]:
+            if v == exclude:
+                continue
+            if dist[v] > dist[u] + 1:
+                dist[v] = dist[u] + 1
+                q.append(v)
+    return dist
