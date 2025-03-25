@@ -13,7 +13,7 @@ from models.other_models import *
 from modules.node_encoder import NodeEncoder
 from modules.layers import LinkTransformerLayer
 
-from util.utils import torch_sparse_tensor_to_sparse_mx, sparse_mx_to_torch_sparse_tensor, drnl_node_labeling
+from util.utils import torch_sparse_tensor_to_sparse_mx, sparse_mx_to_torch_sparse_tensor, drnl_node_labeling, drnl_subgraph_labeling
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -221,6 +221,7 @@ class LinkTransformer(nn.Module):
                 all_mask = torch.cat((cn_info[0], onehop_info[0], non1hop_info[0]), dim=-1)
                 batch_idx = all_mask[0, :]
                 node_idx = all_mask[1, :]
+                # subg_drnl = drnl_subgraph_labeling(self.data['coo_adj'].tocsr(), batch[0], batch[1], all_mask)
                 subg_drnl = self.drnl[batch_idx, node_idx]
                 drnl_info = (all_mask, subg_drnl)
                 pes = self.get_pos_encodings(cn_info, onehop_info, non1hop_info, drnl_info)
