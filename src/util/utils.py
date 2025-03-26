@@ -306,25 +306,30 @@ def drnl_subgraph_labeling(adj, batch_src, batch_dst, subg_mask):
         mask = (batch_indices == i)
         if not np.any(mask):
             continue
-        
+
         nodes_i = node_indices[mask].tolist()
         src_i = batch_src[i].item()
         dst_i = batch_dst[i].item()
         src_i, dst_i = sorted((src_i, dst_i))
-        
-        if src_i not in nodes_i or dst_i not in nodes_i:
-            continue  # 确保源和目标在子图中
-        
-        # 构建子图邻接表
+
+        # 动态添加缺失的src/dst节点
+        if src_i not in nodes_i:
+            nodes_i.append(src_i)
+        if dst_i not in nodes_i:
+            nodes_i.append(dst_i)
+
+        # 邻接表构建
         node_to_sub = {u: idx for idx, u in enumerate(nodes_i)}
         sub_size = len(nodes_i)
         sub_adj = [[] for _ in range(sub_size)]
+
+        # 遍历所有子图节点
         for sub_idx, u in enumerate(nodes_i):
             neighbors = adj.indices[adj.indptr[u]:adj.indptr[u+1]]
-            for v in neighbors:
-                if v in node_to_sub:
-                    sub_adj[sub_idx].append(node_to_sub[v])
-        
+            # 仅保留存在于当前子图的邻居
+            valid_neighbors = [v for v in neighbors if v in node_to_sub]
+            sub_adj[sub_idx] = [node_to_sub[v] for v in valid_neighbors]
+                
         # 获取源和目标在子图中的位置
         src_sub = node_to_sub[src_i]
         dst_sub = node_to_sub[dst_i]
