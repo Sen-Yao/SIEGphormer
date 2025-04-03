@@ -212,6 +212,8 @@ def run_model(cmd_args):
         "thresh_cn": cmd_args.thresh_cn,
         "thresh_non1hop": cmd_args.thresh_non1hop,
 
+        'epochs': cmd_args.epochs,
+        'kill_cnt': cmd_args.kill_cnt,
         'mat_prop': cmd_args.mat_prop,
         'alpha': cmd_args.alpha,
         'drnl': cmd_args.drnl,
