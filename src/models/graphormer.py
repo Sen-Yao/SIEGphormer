@@ -8,6 +8,8 @@ import pdb
 import networkx as nx
 from collections import defaultdict
 
+from time import time
+
 class FeedForwardNetwork(nn.Module):
     def __init__(self, hidden_size, ffn_size, dropout_rate):
         super(FeedForwardNetwork, self).__init__()
@@ -51,8 +53,6 @@ class MultiHeadAttention(nn.Module):
     def forward(self, q, k, v, attn_bias=None, spatial_pos_query=None, spatial_pos_key=None):
         orig_q_size = q.size()
         batch_size = q.size(0)
-        print("spatial_pos_query size:", spatial_pos_query.size())
-        print("spatial_pos_key size:", spatial_pos_key.size())
         # head_i = Attention(Q(W^Q)_i, K(W^K)_i, V(W^V)_i)
         q = self.linear_q(q).view(batch_size, -1, self.num_heads, self.att_size)
         k = self.linear_k(k).view(batch_size, -1, self.num_heads, self.att_size)
@@ -65,10 +65,7 @@ class MultiHeadAttention(nn.Module):
         if self.grpe_cross:
             spatial_bias_query = torch.matmul(q.unsqueeze(3), spatial_pos_query.transpose(3, 4)).squeeze(3)
             spatial_bias_key = torch.matmul(k.unsqueeze(3), spatial_pos_key.transpose(3, 4)).squeeze(3)
-            # print("spatial_bias_query size:", spatial_bias_query.size())
-            # print("spatial_bias_key size:", spatial_bias_key.size())
             spatial_bias = spatial_bias_query + spatial_bias_key
-            # print("spatial_bias size:", spatial_bias.size())
             a = torch.matmul(q, k.transpose(2, 3)) + spatial_bias  # 不加edge_bais
             a = a * self.scale
         else:
@@ -87,8 +84,6 @@ class MultiHeadAttention(nn.Module):
         # v: [n_graph, num_heads, n_node+1, att_size]
         # x: [n_graph, num_heads, n_node+1, att_size]
         x = a.matmul(v)
-        # if self.grpe_cross:
-        #     x += a.unsqueeze(3).matmul(spatial_pos_query).squeeze()
         x = x.transpose(1, 2).contiguous()  # [n_graph, n_node+1, num_heads, att_size]
         x = x.view(batch_size, -1, self.num_heads * self.att_size)
         x = self.output_layer(x)
@@ -567,16 +562,16 @@ class SubgraphGraphormer(Graphormer):
         batch_attn_bias = []
         spatial_pos_queries = []
         spatial_pos_keys = []
-        
+
         for sub_nodes in subgraphs:
             k = len(sub_nodes)
             if k == 0:
                 continue  # 跳过空子图
-                
+
             # 构建子图特征
             graph_features = self._build_subgraph_features(data, sub_nodes, device)
             batch_features.append(graph_features)
-            
+
             # 计算子图指标
             metrics = self._compute_subgraph_metrics(data, sub_nodes.tolist())
             
@@ -585,21 +580,22 @@ class SubgraphGraphormer(Graphormer):
             if not self.grpe_cross:
                 spatial_bias = self._get_spatial_bias(metrics, k)
                 attn_bias[:, :, 1:, 1:] = spatial_bias
-                
+
             # 处理虚拟节点连接
             t = self.graph_token_virtual_distance.weight.view(1, self.num_heads, 1)
             attn_bias[:, :, 1:, 0] += t
             attn_bias[:, :, 0, :] += t
             batch_attn_bias.append(attn_bias)
-            
+
             # 处理GRPE交叉特征
             if self.grpe_cross:
                 query, key = self._build_grpe_features(metrics, k)
                 spatial_pos_queries.append(query)
                 spatial_pos_keys.append(key)
         # 批量对齐处理
+        
         max_k = max(f.size(1) for f in batch_features)
-        print("max_k=", max_k)
+
         padded_features = []
         padded_attn_bias = []
         for feat, bias in zip(batch_features, batch_attn_bias):
@@ -623,7 +619,7 @@ class SubgraphGraphormer(Graphormer):
                 )
             else:
                 output = enc_layer(output, batch_attn)
-                
+
         return self.final_ln(output), (u_pos, v_pos)
 
     def _compute_subgraph_metrics(self, data, sub_nodes):
@@ -649,7 +645,7 @@ class SubgraphGraphormer(Graphormer):
             'undir_aa': np.zeros((k, k)),
             'undir_ra': np.zeros((k, k))
         }
-        
+
         # 并行计算指标
         for i in range(k):
             for j in range(i+1, k):

@@ -7,7 +7,7 @@ nohup python ./src/run.py \
   --lr 5e-3 \
   --gnn-layers 1 \
   --dim 128 \
-  --batch-size 1024 \
+  --batch-size 128 \
   --epochs 200 \
   --eps 1e-7 \
   --gnn-drop 0.1 \

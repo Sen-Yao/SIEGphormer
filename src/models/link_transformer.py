@@ -197,11 +197,6 @@ class LinkTransformer(nn.Module):
 
         # 计算节点对的那些相关信息
         pairwise_feats, att_weights = self.calc_pairwise(batch, X_node, test_set, adj_mask=adj_mask, return_weights=return_weights)
-        # print('h_graphormer', self.h_graphormer.shape)
-
-        print("elementwise_edge_feats", elementwise_edge_feats.shape)
-        print("pairwise_feats", pairwise_feats.shape)
-        print("graphormer_output", graphormer_output.shape)
 
         combined_feats = torch.cat((elementwise_edge_feats, pairwise_feats), dim=-1)
 
