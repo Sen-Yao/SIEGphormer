@@ -217,6 +217,7 @@ def run_model(cmd_args):
         'mat_prop': cmd_args.mat_prop,
         'alpha': cmd_args.alpha,
         'drnl': cmd_args.drnl,
+        'graphormer': cmd_args.graphormer,
         'branch': "APPNP"
     }
     global_logger.save_args(cmd_args, args)
@@ -283,6 +284,7 @@ def main():
     parser.add_argument('--mat_prop', type=int, default=2)
     parser.add_argument('--alpha', type=float, default=0.1)
     parser.add_argument('--drnl', type=int, default=0)
+    parser.add_argument("--graphormer", action='store_true', default=False)
 
 
     args = parser.parse_args()
