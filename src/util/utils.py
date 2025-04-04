@@ -160,7 +160,7 @@ class Logger(object):
             return mean_list, var_list
     
     def save_args(self, cmd_args, args):
-        text = "\n\nTraining arguments:\n"
+        text = "\n\Training arguments:\n"
         for arg_name, value in args.items():
             text = text + str(arg_name) + ": " + str(value) + "\n"
         self.write_down(text)
@@ -238,26 +238,30 @@ def drnl_node_labeling(adj, batch_src, batch_dst):
     for i in range(batch_size):
         src = batch_src[i].item()
         dst = batch_dst[i].item()
-        
-        # 确保 src <= dst
-        src, dst = (dst, src) if src > dst else (src, dst)
-        
-        # 构建排除src后的邻接矩阵
-        idx_wo_src = list(range(src)) + list(range(src + 1, num_nodes))
-        adj_wo_src = adj[idx_wo_src, :][:, idx_wo_src]
-        
-        # 构建排除dst后的邻接矩阵
-        idx_wo_dst = list(range(dst)) + list(range(dst + 1, num_nodes))
-        adj_wo_dst = adj[idx_wo_dst, :][:, idx_wo_dst]
-        
-        # 计算到src的最短路径（排除dst节点）
-        dist2src = shortest_path(adj_wo_dst, directed=False, unweighted=True, indices=src)
-        dist2src = np.insert(dist2src, dst, 0)  # 插入被排除的dst节点距离为0
-        
-        # 计算到dst的最短路径（排除src节点）
-        # 注意：在排除src后的邻接矩阵中，原dst节点的索引为dst-1（因为src <= dst）
-        dist2dst = shortest_path(adj_wo_src, directed=False, unweighted=True, indices=dst-1)
-        dist2dst = np.insert(dist2dst, src, 0)  # 插入被排除的src节点距离为0
+
+        if src > dst: src, dst = dst, src
+        # 处理自环情况
+        if src == dst:
+            # 自环时不排除任何节点
+            dist2src = shortest_path(adj, directed=False, unweighted=True, indices=src)
+            dist2dst = dist2src.copy()
+        else:
+            # 排除dst后的邻接矩阵
+            idx_wo_dst = list(range(dst)) + list(range(dst + 1, num_nodes))
+            adj_wo_dst = adj[idx_wo_dst, :][:, idx_wo_dst]
+            
+            # 排除src后的邻接矩阵
+            idx_wo_src = list(range(src)) + list(range(src + 1, num_nodes))
+            adj_wo_src = adj[idx_wo_src, :][:, idx_wo_src]
+            
+            # 计算到src的最短路径（排除dst节点）
+            dist2src_wo_dst = shortest_path(adj_wo_dst, directed=False, unweighted=True, indices=src)
+            dist2src = np.insert(dist2src_wo_dst, dst, 0)  # 插入dst节点的距离为0
+            
+            # 计算到dst的最短路径（排除src节点）
+            # 在排除src后的邻接矩阵中，原dst的索引为dst-1
+            dist2dst_wo_src = shortest_path(adj_wo_src, directed=False, unweighted=True, indices=dst-1)
+            dist2dst = np.insert(dist2dst_wo_src, src, 0)  # 插入src节点的距离为0
         
         # 转换为Tensor
         dist2src = torch.from_numpy(dist2src).float().to(device)
@@ -306,17 +310,17 @@ def drnl_subgraph_labeling(adj, batch_src, batch_dst, subg_mask):
         mask = (batch_indices == i)
         if not np.any(mask):
             continue
-
+        
         nodes_i = node_indices[mask].tolist()
         src_i = batch_src[i].item()
         dst_i = batch_dst[i].item()
+
+        # 确保 src < dst
         src_i, dst_i = sorted((src_i, dst_i))
 
         # 动态添加缺失的src/dst节点
-        if src_i not in nodes_i:
-            nodes_i.append(src_i)
-        if dst_i not in nodes_i:
-            nodes_i.append(dst_i)
+        nodes_i.extend([src_i, dst_i])
+        nodes_i = list(dict.fromkeys(nodes_i))  # 保持插入顺序的去重
 
         # 邻接表构建
         node_to_sub = {u: idx for idx, u in enumerate(nodes_i)}
@@ -333,11 +337,14 @@ def drnl_subgraph_labeling(adj, batch_src, batch_dst, subg_mask):
         # 获取源和目标在子图中的位置
         src_sub = node_to_sub[src_i]
         dst_sub = node_to_sub[dst_i]
-        
-        # 计算到src的最短路径（排除dst）
-        d_src = bfs_exclude(sub_adj, src_sub, exclude=dst_sub)
-        # 计算到dst的最短路径（排除src）
-        d_dst = bfs_exclude(sub_adj, dst_sub, exclude=src_sub)
+
+        # 自环时不排除任何节点
+        if src_i == dst_i:
+            d_src = bfs_exclude(sub_adj, src_sub, exclude=None)  # 普通BFS不排除节点
+            d_dst = d_src.copy()           # 复制结果避免重复计算
+        else:
+            d_src = bfs_exclude(sub_adj, src_sub, exclude=dst_sub) # 计算到src的最短路径（排除dst）
+            d_dst = bfs_exclude(sub_adj, dst_sub, exclude=src_sub) # 计算到dst的最短路径（排除src）
         
         # 转换为Tensor并处理不可达节点
         d_src = torch.tensor(d_src, dtype=torch.float, device=device)
@@ -359,7 +366,8 @@ def drnl_subgraph_labeling(adj, batch_src, batch_dst, subg_mask):
         
         # 填充到结果张量
         batch_pos = np.where(mask)[0]
-        drnl_value[batch_pos] = z.to(device)
+        original_count = len(node_indices[mask].tolist())  # 原始节点数（不包括可能自己添加进来的 src 和 dst）
+        drnl_value[batch_pos] = z[:original_count].to(device)
     
     return drnl_value.to(torch.float32)
 

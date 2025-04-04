@@ -181,4 +181,72 @@ class mlp_score(torch.nn.Module):
 
 
 
+class PairMLP(nn.Module):
+    def __init__(
+        self, 
+        num_layers: int,
+        in_channels: int,  # 单个节点的特征维度（u_emb和v_emb的输入维度）
+        hid_channels: int, 
+        out_channels: int,  # 最终输出维度（self.dim）
+        drop: float = 0.0,
+        norm: str = "layer",
+        sigmoid: bool = False,
+        bias: bool = True,
+        merge_method: str = "concat",  # 新增参数：合并u_emb和v_emb的方式
+    ):
+        super().__init__()
+        assert num_layers >= 1, "至少需要1个线性层"
+        assert merge_method in ["concat", "sum", "mul", "avg"], "合并方式无效"
+        
+        self.merge_method = merge_method
+        self.sigmoid = sigmoid
+        
+        # 根据合并方式调整输入维度
+        if self.merge_method == "concat":
+            merged_dim = 2 * in_channels  # 拼接后维度翻倍
+        else:
+            merged_dim = in_channels  # 其他方式维度不变
+            
+        # 构建隐藏层
+        layers = []
+        for i in range(num_layers - 1):  # 前n-1层为隐藏层
+            in_dim = merged_dim if i == 0 else hid_channels
+            layers.append(nn.Linear(in_dim, hid_channels, bias=bias))
+            
+            # 归一化层
+            if norm == "layer":
+                layers.append(nn.LayerNorm(hid_channels))
+            elif norm == "batch":
+                layers.append(nn.BatchNorm1d(hid_channels))
+                
+            layers.append(nn.ReLU())  # 激活函数
+            layers.append(nn.Dropout(drop))
+        
+        # 最后一层（输出层）
+        layers.append(nn.Linear(hid_channels, out_channels, bias=bias))
+        self.mlp = nn.Sequential(*layers)
+        
+    def _merge_embeddings(self, u_emb: torch.Tensor, v_emb: torch.Tensor) -> torch.Tensor:
+        """合并u和v的特征"""
+        if self.merge_method == "concat":
+            return torch.cat([u_emb, v_emb], dim=-1)  # [batch, 2*in_channels]
+        elif self.merge_method == "sum":
+            return u_emb + v_emb
+        elif self.merge_method == "mul":
+            return u_emb * v_emb
+        elif self.merge_method == "avg":
+            return (u_emb + v_emb) / 2.0
+        else:
+            raise ValueError(f"不支持的合并方式: {self.merge_method}")
 
+    def forward(
+        self, 
+        u_emb: torch.Tensor,  # 形状 [batch, in_channels]
+        v_emb: torch.Tensor   # 形状 [batch, in_channels]
+    ) -> torch.Tensor:
+        merged = self._merge_embeddings(u_emb, v_emb)  # 合并
+        out = self.mlp(merged)  # 通过MLP
+        
+        if self.sigmoid:
+            return torch.sigmoid(out)  # 输出概率
+        return out  # 形状 [batch, out_channels]
