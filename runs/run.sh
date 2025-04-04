@@ -7,7 +7,7 @@ nohup python ./src/run.py \
   --lr 5e-3 \
   --gnn-layers 1 \
   --dim 128 \
-  --batch-size 128 \
+  --batch-size 1024 \
   --epochs 200 \
   --eps 1e-7 \
   --gnn-drop 0.1 \
@@ -27,4 +27,4 @@ nohup python ./src/run.py \
   --alpha 0.7 \
   --drnl 1 \
   --device 1 \
-> ./logs/${cmd_time}-test_graphormer.log 2>&1 &
+> ./logs/${cmd_time}-test_slow_drnl.log 2>&1 &

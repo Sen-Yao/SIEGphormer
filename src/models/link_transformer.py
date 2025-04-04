@@ -59,7 +59,10 @@ class LinkTransformer(nn.Module):
         self.att_drop = train_args.get('att_drop', 0)
         self.num_layers = train_args['trans_layers']
         self.num_nodes = data['x'].shape[0]
-        self.out_dim = self.dim * 2
+        if train_args['graphormer']:
+            self.out_dim = self.dim * 3
+        else:
+            self.out_dim = self.dim * 2
 
         self.gnn_norm = nn.LayerNorm(self.dim)
         self.node_encoder = NodeEncoder(data, train_args, device=device)
@@ -173,20 +176,11 @@ class LinkTransformer(nn.Module):
         # self.subgraph_mask = self.cal_subgraph_mask(batch, test_set, adj_mask)
         
         # 全局计算 DRNL
-        if False:
+        if True:
             self.drnl = drnl_node_labeling(self.data['coo_adj'].tocsr(), batch[0], batch[1])
             # print("forward", self.drnl.dtype)
             # drnl 形状为 (batch_size, num_nodes) 的稀疏矩阵
 
-        # Graphormer 部分
-        if True:
-            cn_info, onehop_info, non1hop_info = self.compute_node_mask(batch, test_set, adj_mask)
-            subg_mask = torch.cat((cn_info[0], onehop_info[0], non1hop_info[0]), dim=-1)
-            h_graphormer, (u_pos, v_pos) = self.graphormer(self.data, subg_mask, batch[0], batch[1])  # 输出应为 (batchsize, max_k+3, sefl.dim)
-            batch_size = h_graphormer.size(0)
-            u_emb = h_graphormer[torch.arange(batch_size), u_pos, :]
-            v_emb = h_graphormer[torch.arange(batch_size), v_pos, :]
-            graphormer_output = self.graphormer_encoder(u_emb, v_emb)
             
 
         # batch[0] 为长度为 batch_size 的一个一维向量，表示了这个 batch 所有的目标节点对的 a 节点，同理 batch[1] 表示了 b 节点
@@ -198,7 +192,18 @@ class LinkTransformer(nn.Module):
         # 计算节点对的那些相关信息
         pairwise_feats, att_weights = self.calc_pairwise(batch, X_node, test_set, adj_mask=adj_mask, return_weights=return_weights)
 
-        combined_feats = torch.cat((elementwise_edge_feats, pairwise_feats), dim=-1)
+        # Graphormer 部分
+        if self.train_args['graphormer'] and False:
+            cn_info, onehop_info, non1hop_info = self.compute_node_mask(batch, test_set, adj_mask)
+            subg_mask = torch.cat((cn_info[0], onehop_info[0], non1hop_info[0]), dim=-1)
+            h_graphormer, (u_pos, v_pos) = self.graphormer(self.data, subg_mask, batch[0], batch[1])  # 输出应为 (batchsize, max_k+3, sefl.dim)
+            batch_size = h_graphormer.size(0)
+            u_emb = h_graphormer[torch.arange(batch_size), u_pos, :]
+            v_emb = h_graphormer[torch.arange(batch_size), v_pos, :]
+            graphormer_output = self.graphormer_encoder(u_emb, v_emb)
+            combined_feats = torch.cat((elementwise_edge_feats, pairwise_feats, graphormer_output), dim=-1)
+        else:
+            combined_feats = torch.cat((elementwise_edge_feats, pairwise_feats), dim=-1)
 
         return combined_feats if not return_weights else (combined_feats, att_weights)
     
@@ -262,10 +267,10 @@ class LinkTransformer(nn.Module):
                 
                 # 传统 DRNL 或子图 DRNL
                 # 传统 DRNL：此外，还需要在 forward 时启动 self.drnl 的更新
-                # subg_drnl = self.drnl[all_mask[0, :], all_mask[1, :]]
+                subg_drnl = self.drnl[all_mask[0, :], all_mask[1, :]]
 
                 # 子图 DRNL
-                subg_drnl = drnl_subgraph_labeling(self.data['coo_adj'].tocsr(), batch[0], batch[1], all_mask)
+                # subg_drnl = drnl_subgraph_labeling(self.data['coo_adj'].tocsr(), batch[0], batch[1], all_mask)
                 
                 drnl_info = (all_mask, subg_drnl)
 
