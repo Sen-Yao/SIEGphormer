@@ -327,13 +327,23 @@ def drnl_subgraph_labeling(adj, batch_src, batch_dst, subg_mask):
         sub_size = len(nodes_i)
         sub_adj = [[] for _ in range(sub_size)]
 
-        # 遍历所有子图节点
+        # 先收集所有边
+        edges = set()
         for sub_idx, u in enumerate(nodes_i):
             neighbors = adj.indices[adj.indptr[u]:adj.indptr[u+1]]
-            # 仅保留存在于当前子图的邻居
-            valid_neighbors = [v for v in neighbors if v in node_to_sub]
-            sub_adj[sub_idx] = [node_to_sub[v] for v in valid_neighbors]
-                
+            for v in neighbors:
+                if v in node_to_sub:
+                    edges.add((sub_idx, node_to_sub[v]))
+                    edges.add((node_to_sub[v], sub_idx))  # 确保双向
+
+        # 构建邻接表
+        for u, v in edges:
+            sub_adj[u].append(v)
+
+        # 去重和排序
+        sub_adj = [sorted(list(set(neighbors))) for neighbors in sub_adj]
+        # print("adj", adj)   
+        # print("sub_adj", sub_adj)     
         # 获取源和目标在子图中的位置
         src_sub = node_to_sub[src_i]
         dst_sub = node_to_sub[dst_i]
