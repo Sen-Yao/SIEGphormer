@@ -12,7 +12,7 @@ from scipy.sparse.csgraph import shortest_path
 from collections import deque
 
 from datetime import datetime
-
+from scipy.sparse import csr_matrix
 
 def init_seed(seed=42):
     np.random.seed(seed)
@@ -282,117 +282,120 @@ def drnl_node_labeling(adj, batch_src, batch_dst):
     # 堆叠结果 (batch_size, num_nodes)
     return torch.stack(batch_z, dim=0).to(torch.float32)
 
-def drnl_subgraph_labeling(adj, batch_src, batch_dst, subg_mask):
+def drnl_subgraph_labeling(adj: csr_matrix, batch_src: torch.Tensor, 
+                          batch_dst: torch.Tensor, subg_mask: torch.Tensor) -> torch.Tensor:
     """
-    改进后的DRNL标签计算函数，处理子图。
+    改进的DRNL标签计算函数，考虑全图连接。
     
     参数:
-    adj: scipy.sparse.csr_matrix，图的邻接矩阵
-    batch_src: 一维Tensor，批量的源节点索引
-    batch_dst: 一维Tensor，批量的目标节点索引
-    subg_mask: (2, n)的Tensor，每列表示(batch_idx, node_idx)
+        adj: 图的邻接矩阵（CSR格式）
+        batch_src: 批量的源节点索引
+        batch_dst: 批量的目标节点索引
+        subg_mask: (2, n)的Tensor，每列为(batch_idx, node_idx)
     
     返回:
-    drnl_value: (n)的LongTensor，每个节点的DRNL值
+        DRNL标签值，形状为(n)的FloatTensor
     """
     device = subg_mask.device
     n = subg_mask.size(1)
     batch_size = batch_src.size(0)
     drnl_value = torch.zeros(n, dtype=torch.long, device=device)
     
-    # 转换为CPU numpy数组以处理稀疏矩阵
     subg_mask_np = subg_mask.cpu().numpy()
-    batch_indices = subg_mask_np[0]
-    node_indices = subg_mask_np[1]
+    batch_indices, node_indices = subg_mask_np[0], subg_mask_np[1]
     
     for i in range(batch_size):
-        # 提取当前batch的节点
+        # 获取当前batch的节点掩码
         mask = (batch_indices == i)
         if not np.any(mask):
             continue
         
-        nodes_i = node_indices[mask].tolist()
+        # 获取原始节点列表并添加src/dst
+        original_nodes = node_indices[mask].tolist()
         src_i = batch_src[i].item()
         dst_i = batch_dst[i].item()
-
-        # 确保 src < dst
         src_i, dst_i = sorted((src_i, dst_i))
-
-        # 动态添加缺失的src/dst节点
+        
+        # 构建包含src/dst的节点列表（保持插入顺序）
+        nodes_i = original_nodes.copy()
         nodes_i.extend([src_i, dst_i])
-        nodes_i = list(dict.fromkeys(nodes_i))  # 保持插入顺序的去重
-
-        # 邻接表构建
-        node_to_sub = {u: idx for idx, u in enumerate(nodes_i)}
-        sub_size = len(nodes_i)
-        sub_adj = [[] for _ in range(sub_size)]
-
-        # 先收集所有边
-        edges = set()
-        for sub_idx, u in enumerate(nodes_i):
-            neighbors = adj.indices[adj.indptr[u]:adj.indptr[u+1]]
-            for v in neighbors:
-                if v in node_to_sub:
-                    edges.add((sub_idx, node_to_sub[v]))
-                    edges.add((node_to_sub[v], sub_idx))  # 确保双向
-
-        # 构建邻接表
-        for u, v in edges:
-            sub_adj[u].append(v)
-
-        # 去重和排序
-        sub_adj = [sorted(list(set(neighbors))) for neighbors in sub_adj]
-        # print("adj", adj)   
-        # print("sub_adj", sub_adj)     
-        # 获取源和目标在子图中的位置
-        src_sub = node_to_sub[src_i]
-        dst_sub = node_to_sub[dst_i]
-
-        # 自环时不排除任何节点
+        nodes_i = list(dict.fromkeys(nodes_i))  # 去重
+        
+        # 执行BFS计算距离
         if src_i == dst_i:
-            d_src = bfs_exclude(sub_adj, src_sub, exclude=None)  # 普通BFS不排除节点
-            d_dst = d_src.copy()           # 复制结果避免重复计算
+            d_src = bfs_exclude(adj, src_i)
+            d_dst = d_src.copy()
         else:
-            d_src = bfs_exclude(sub_adj, src_sub, exclude=dst_sub) # 计算到src的最短路径（排除dst）
-            d_dst = bfs_exclude(sub_adj, dst_sub, exclude=src_sub) # 计算到dst的最短路径（排除src）
+            d_src = bfs_exclude(adj, src_i, exclude=dst_i)
+            d_dst = bfs_exclude(adj, dst_i, exclude=src_i)
+        
+        # 收集所有节点的距离
+        d_src_list = [d_src.get(u, float('inf')) for u in nodes_i]
+        d_dst_list = [d_dst.get(u, float('inf')) for u in nodes_i]
         
         # 转换为Tensor并处理不可达节点
-        d_src = torch.tensor(d_src, dtype=torch.float, device=device)
-        d_src[d_src == float('inf')] = torch.nan
-        d_dst = torch.tensor(d_dst, dtype=torch.float, device=device)
-        d_dst[d_dst == float('inf')] = torch.nan
+        d_src_t = torch.tensor(d_src_list, device=device, dtype=torch.float)
+        d_dst_t = torch.tensor(d_dst_list, device=device, dtype=torch.float)
+        d_src_t[d_src_t == float('inf')] = torch.nan
+        d_dst_t[d_dst_t == float('inf')] = torch.nan
         
         # 计算DRNL标签
-        dist = d_src + d_dst
+        dist = d_src_t + d_dst_t
         dist_over_2 = torch.div(dist, 2, rounding_mode='floor')
         dist_mod_2 = dist % 2
         
-        z = 1 + torch.minimum(d_src, d_dst)
+        z = 1 + torch.minimum(d_src_t, d_dst_t)
         z += dist_over_2 * (dist_over_2 + dist_mod_2 - 1)
-        z[src_sub] = 1.0
-        z[dst_sub] = 1.0
+        
+        # 特殊处理src和dst节点
+        src_pos = nodes_i.index(src_i)
+        dst_pos = nodes_i.index(dst_i)
+        z[src_pos] = 1.0
+        z[dst_pos] = 1.0
+        
+        # 处理不可达节点并转换类型
         z[torch.isnan(z)] = 0
         z = z.long()
         
-        # 填充到结果张量
+        # 映射回原始节点顺序
+        node_to_idx = {u: idx for idx, u in enumerate(nodes_i)}
+        z_indices = [node_to_idx[u] for u in original_nodes]
+        z_values = z[z_indices]
+        
+        # 填充结果张量
         batch_pos = np.where(mask)[0]
-        original_count = len(node_indices[mask].tolist())  # 原始节点数（不包括可能自己添加进来的 src 和 dst）
-        drnl_value[batch_pos] = z[:original_count].to(device)
+        drnl_value[batch_pos] = z_values
     
     return drnl_value.to(torch.float32)
 
-def bfs_exclude(sub_adj, start, exclude):
-    n = len(sub_adj)
-    dist = [float('inf')] * n
-    dist[start] = 0
-    q = deque([start])
+def bfs_exclude(adj: csr_matrix, start: int, exclude: int = None) -> dict:
+    """
+    执行BFS，计算从start节点到其他节点的距离，排除exclude节点。
     
-    while q:
-        u = q.popleft()
-        for v in sub_adj[u]:
-            if v == exclude:
+    参数:
+        adj: 图的邻接矩阵（CSR格式）
+        start: 起始节点的全局索引
+        exclude: 需要排除的节点的全局索引
+    
+    返回:
+        字典，键为节点索引，值为距离（未访问的节点不在字典中）
+    """
+    distances = {start: 0}
+    queue = deque([start])
+    
+    while queue:
+        u = queue.popleft()
+        current_dist = distances[u]
+        
+        # 遍历当前节点的邻居
+        neighbors = adj.indices[adj.indptr[u]:adj.indptr[u+1]]
+        for v in neighbors:
+            # 跳过排除的节点
+            if exclude is not None and v == exclude:
                 continue
-            if dist[v] > dist[u] + 1:
-                dist[v] = dist[u] + 1
-                q.append(v)
-    return dist
+            # 更新未访问节点的距离
+            if v not in distances:
+                distances[v] = current_dist + 1
+                queue.append(v)
+    
+    return distances

@@ -4,7 +4,7 @@ cmd_time=`TZ=UTC-8 date  "+%Y%m%d-%H%M%S"`
 
 nohup python ./src/run.py \
   --data_name cora \
-  --lr 5e-3 \
+  --lr 1e-3 \
   --gnn-layers 1 \
   --dim 128 \
   --batch-size 1024 \
@@ -22,9 +22,9 @@ nohup python ./src/run.py \
   --eval_steps 1 \
   --decay 0.975 \
   --runs 10 \
-  --kill_cnt 100 \
+  --kill_cnt 50 \
   --mat_prop 1 \
   --alpha 0.7 \
   --drnl 1 \
   --device 1 \
-> ./logs/${cmd_time}-test_slow_drnl.log 2>&1 &
+> ./logs/${cmd_time}-fast_drnl_lower_lr_kill100.log 2>&1 &

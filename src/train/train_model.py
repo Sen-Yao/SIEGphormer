@@ -142,7 +142,7 @@ def train_loop(args, train_args, data, device, loggers, seed, model_save_name, v
                 if kill_cnt > args.kill_cnt: 
                     if True:
                         global_logger.write_down("Early Stop!")
-                        global_logger.write_down(f"---------------------  Epoch {epoch}, {key} = {result}---------------------")
+                        global_logger.write_down(f"best_valid = {best_valid}")
                         print(model.alpha)
                     break
                     
