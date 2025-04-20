@@ -22,9 +22,9 @@ nohup python ./src/run.py \
   --eval_steps 1 \
   --decay 0.975 \
   --runs 10 \
-  --kill_cnt 50 \
+  --kill_cnt 30 \
   --mat_prop 1 \
   --alpha 0.7 \
   --drnl 1 \
   --device 1 \
-> ./logs/${cmd_time}-fast_drnl_lower_lr_kill100.log 2>&1 &
+> ./logs/${cmd_time}-fullg_drnl_lower_lr_kill30.log 2>&1 &

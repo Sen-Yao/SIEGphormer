@@ -176,7 +176,7 @@ class LinkTransformer(nn.Module):
         # self.subgraph_mask = self.cal_subgraph_mask(batch, test_set, adj_mask)
         
         # 全局计算 DRNL
-        if False:
+        if True:
             self.drnl = drnl_node_labeling(self.data['coo_adj'].tocsr(), batch[0], batch[1])
             # print("forward", self.drnl.dtype)
             # drnl 形状为 (batch_size, num_nodes) 的稀疏矩阵
@@ -270,7 +270,7 @@ class LinkTransformer(nn.Module):
                 subg_drnl = self.drnl[all_mask[0, :], all_mask[1, :]]
 
                 # 子图 DRNL
-                subg_drnl = drnl_subgraph_labeling(self.data['coo_adj'].tocsr(), batch[0], batch[1], all_mask)
+                # subg_drnl = drnl_subgraph_labeling(self.data['coo_adj'].tocsr(), batch[0], batch[1], all_mask)
                 
                 drnl_info = (all_mask, subg_drnl)
 
