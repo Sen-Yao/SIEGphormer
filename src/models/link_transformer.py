@@ -90,7 +90,7 @@ class LinkTransformer(nn.Module):
             self.ppr_encoder_onehop = MLP(2, 2, self.dim, self.dim)
             self.ppr_encoder_non1hop = MLP(2, 2, self.dim, self.dim)
 
-        self.drnl_encoder = MLP(2, 1, self.dim, self.dim)
+        # self.drnl_encoder = MLP(2, 1, self.dim, self.dim)
         
         pairwise_dim = self.dim * train_args['num_heads'] + count_dim
         self.pairwise_lin = MLP(2, pairwise_dim, pairwise_dim, self.dim)          
@@ -135,6 +135,14 @@ class LinkTransformer(nn.Module):
             merge_method="concat"
         )
         self.to(device=device)
+
+        # 对各个启发式方法应用 MLP 进行编码
+        self.CN_encoder = MLP(2, 2, self.dim, self.dim)
+        self.AA_encoder = MLP(2, 2, self.dim, self.dim)
+        self.PPR_encoder = MLP(2, 2, self.dim, self.dim)
+        self.DRNL_encoder = MLP(2, 2, self.dim, self.dim)
+
+        self.structure_encoder = MLP(2, 4 * self.dim, self.dim, self.dim)
 
     def forward(self, batch, adj_prop=None, adj_mask=None, test_set=False, return_weights=False):
         """
@@ -686,3 +694,142 @@ class LinkTransformer(nn.Module):
         # weighted_features = (nodes_features * weights.view(1, -1, 1)).sum(dim=1)
 
         return weighted_features
+    
+    def khop_sampling(self, batch, k=3):
+        """
+        根据全局的邻接矩阵和 batch 中的节点对，进行 k-hop 邻接矩阵采样。若某节点存在于两个目标节点对之一的 k 跳内，则该节点会被采样到。
+        每个样本都有对应的节点对，从而采样出对应的一个子图。
+        
+        此函数输出结果为压缩后的二维 COO 坐标形式的稠密子图掩码矩阵 subg_mask，格式为 (sample_idx, node_idx)
+        其中 sample_idx 表示了当前 batch 中的样本的下标，node_idx 表示了子图中每个节点在全图的下标。
+        最终矩阵的每个元素都代表了 sample_idx 对应的样本中，对应的节点存在于子图中。
+        """
+        # 邻接矩阵为 data['adj_mask']，这是一个 COO 格式的稀疏矩阵，表示了全图的邻接矩阵
+        # batch[0] 是一个目标节点的列表，batch[1] 是另一个目标节点的列表
+        adj = self.data['adj_mask']
+        src_list, dst_list = batch[0].tolist(), batch[1].tolist()
+
+        # 初始化结果列表
+        subg_masks = []
+
+        for sample_idx, (src, dst) in enumerate(zip(src_list, dst_list)):
+            # 初始化当前样本的子图节点集合
+            src_nodes = {src}
+            dst_nodes = {dst}
+
+            # BFS 进行 k-hop 采样
+            for _ in range(k):
+                # 获取当前 hop 的邻居
+                src_neighbors = set(adj.indices()[1][adj.indices()[0] == torch.tensor(list(src_nodes))].tolist())
+                dst_neighbors = set(adj.indices()[1][adj.indices()[0] == torch.tensor(list(dst_nodes))].tolist())
+
+                # 更新节点集合，避免重复采样
+                src_nodes.update(src_neighbors)
+                dst_nodes.update(dst_neighbors)
+
+            # 合并两个目标节点的 k-hop 邻居集合
+            k_hop_nodes = src_nodes.union(dst_nodes)
+
+            # 将子图节点集合转换为 COO 格式
+            for node in k_hop_nodes:
+                subg_masks.append((sample_idx, node))
+
+        # 转换为张量形式
+        subg_mask = torch.tensor(subg_masks, dtype=torch.long).t()
+
+        return subg_mask
+    
+    def cal_heuristic(self, batch, subg_mask):
+        """
+        根据输入子图掩码，计算相关的结构性指标，将其存储。用于后续进行 Tokenize
+
+        输入：
+        batch: 形状为（2, batch_size）的张量。每一行分别表示源节点和目标节点的下标。
+        subg_mask: torch.Tensor, 压缩后的二维 COO 坐标形式的稠密子图掩码矩阵，格式为 (sample_idx, node_idx)，形状为 (2, n)， n 为当前 batch 中所有处于子图中的节点个数。
+
+        输出：
+        heuristic_index: 对所有子图中节点计算出的启发式指标
+        """
+        # 初始化启发式指标矩阵，形状为 (n, 4, 2)
+        n = subg_mask.size(1)
+        heuristic_index = torch.zeros((n, 4, 2), device=self.device)
+
+        # 获取目标节点对 (a, b)
+        a_indices = batch[0]
+        b_indices = batch[1]
+
+        # 获取全局邻接矩阵
+        adj = self.data['adj_mask']
+
+        # 遍历子图掩码，计算启发式指标
+        for i in range(n):
+            sample_idx, node_idx = subg_mask[:, i]
+
+            # 计算 CN(a, u) 和 CN(b, u)
+            cn_a = torch.sum(adj[a_indices[sample_idx]] * adj[node_idx])
+            cn_b = torch.sum(adj[b_indices[sample_idx]] * adj[node_idx])
+            heuristic_index[i, 0, 0] = cn_a
+            heuristic_index[i, 0, 1] = cn_b
+
+            # 计算 AA(a, u) 和 AA(b, u)
+            degree_a = torch.sum(adj[a_indices[sample_idx]])
+            degree_b = torch.sum(adj[b_indices[sample_idx]])
+            degree_u = torch.sum(adj[node_idx])
+            aa_a = torch.sum(adj[a_indices[sample_idx]] * adj[node_idx] / torch.log(degree_u + 1e-10))
+            aa_b = torch.sum(adj[b_indices[sample_idx]] * adj[node_idx] / torch.log(degree_u + 1e-10))
+            heuristic_index[i, 1, 0] = aa_a
+            heuristic_index[i, 1, 1] = aa_b
+
+            # 获取 PPR(a, u) 和 PPR(b, u)
+            _, _, ppr_a, ppr_b = self.get_ppr_vals(batch[:, sample_idx:sample_idx + 1], adj, test_set=False)
+            heuristic_index[i, 2, 0] = ppr_a[node_idx]
+            heuristic_index[i, 2, 1] = ppr_b[node_idx]
+
+            # 获取 DRNL(u)
+            drnl_value = self.drnl[i]
+            heuristic_index[i, 3, 0] = drnl_value
+            heuristic_index[i, 3, 1] = drnl_value
+
+        return heuristic_index
+
+
+
+
+    def tokenizer(self, subg_mask, heuristic_index):
+        """
+        使用可学习层对其进行编码后，将子图中的每个节点 tokenize 为一个向量，提供给后续的 Transformer 模块进行处理。
+
+        输入：
+        subg_mask: torch.Tensor, 压缩后的二维 COO 坐标形式的稠密子图掩码矩阵，格式为 (sample_idx, node_idx)，形状为 (2, n)， n 为当前 batch 中所有处于子图中的节点个数。
+        其中 sample_idx 表示了当前 batch 中的样本的下标，node_idx 表示了子图中每个节点在全图的下标。
+        最终矩阵的每个元素都代表了 sample_idx 对应的样本中，对应的节点存在于子图中。
+        heuristic_index: torch.Tensor, 启发式指标矩阵，形状为 (n, 4, 2)， n 为当前 batch 中所有处于子图中的节点个数。与 subg_mask 一一对应。
+
+        输出：
+        h_tokens: torch.Tensor, 经过可学习层编码后的子图节点向量，形状为 (num_samples, num_nodes, 2 * self.dim)
+        """
+        # 编码 CN(a, u) 和 CN(b, u)
+        cn_encoded = self.CN_encoder(heuristic_index[:, 0, :])
+
+        # 编码 AA(a, u) 和 AA(b, u)
+        aa_encoded = self.AA_encoder(heuristic_index[:, 1, :])
+
+        # 编码 PPR(a, u) 和 PPR(b, u)
+        ppr_encoded = self.PPR_encoder(heuristic_index[:, 2, :])
+
+        # 编码 DRNL(u)
+        drnl_encoded = self.DRNL_encoder(heuristic_index[:, 3, :])
+
+        # 拼接四种结构信息
+        structure_info = torch.cat((cn_encoded, aa_encoded, ppr_encoded, drnl_encoded), dim=-1)
+
+        # 映射到 self.dim 的张量
+        structure_info = self.structure_encoder(structure_info)
+
+        # 获取全局节点特征
+        node_features = self.data['re_feature_x'][subg_mask[1]]
+
+        # 拼接结构信息和节点特征
+        h_tokens = torch.cat((structure_info, node_features), dim=-1)
+
+        return h_tokens
