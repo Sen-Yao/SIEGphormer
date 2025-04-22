@@ -14,6 +14,7 @@ from train.testing import *
 
 from models.other_models import mlp_score
 from models.link_transformer import LinkTransformer
+from models.SIEGphormer import SIEGphormer
 
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "dataset")
@@ -96,8 +97,8 @@ def train_loop(args, train_args, data, device, loggers, seed, model_save_name, v
     eval_metric = args.metric
     evaluator_hit = Evaluator(name='ogbl-collab')
     evaluator_mrr = Evaluator(name='ogbl-citation2') if 'MRR' in loggers else None
-
-    model = LinkTransformer(train_args, data, global_logger, device=device).to(device)
+    # 在这里切换模型 LinkTransformer or SIEGphormer
+    model = SIEGphormer(train_args, data, global_logger, device=device).to(device)
     score_func = mlp_score(model.out_dim, model.out_dim, 1, args.pred_layers, train_args['pred_dropout']).to(device)
                         
     optimizer = torch.optim.Adam(list(model.parameters()) + list(score_func.parameters()), lr=train_args['lr'], weight_decay=train_args['weight_decay'])

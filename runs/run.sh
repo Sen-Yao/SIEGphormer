@@ -27,4 +27,4 @@ nohup python ./src/run.py \
   --alpha 0.7 \
   --drnl 1 \
   --device 1 \
-> ./logs/${cmd_time}-fullg_drnl_lower_lr_kill30.log 2>&1 &
+> ./logs/${cmd_time}-test_run_for_SIEGphormer.log 2>&1 &

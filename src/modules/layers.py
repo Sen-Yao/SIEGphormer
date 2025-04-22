@@ -235,3 +235,81 @@ class LinkAttention(MessagePassing):
         # 最后 w(a,b,u) 和 h(a,b,u) 逐元素相乘得到 s(a,b,u)
         return x_j * alpha.unsqueeze(-1)
 
+
+class GraphTransformer(nn.Module):
+    """
+    这是一个 Graph Transformer ，基于某个子图的所有节点的 token 计算相互注意力，并且做更新。
+
+    输入：
+    h_token: torch.Tensor
+        Size (n, self.dim). 包含了当前 batch 中所有被采样节点的 token。n 为当前 batch 中所有处于子图中的节点个数。
+    batch: torch.Tensor
+        Size (2, batch_size). 包含了当前 batch 中所有样本的目标节点对在全图中的下标信息，其中 h[0] 是源节点 a，h[1] 是目标节点 b
+    subg_mask: torch.Tensor
+        Size (2, n). 压缩后的二维 COO 坐标形式的稠密子图掩码矩阵，每列格式为 (sample_idx, node_idx)
+    输出：
+    h_a: torch.Tensor
+        Size (batch_size，self.dim). 为更新后源节点 a 的 token
+    h_b: torch.Tensor
+        Size (batch_size，self.dim). 为更新后目标节点 b 的 token
+    h_CLS: torch.Tensor
+        Size (batch_size，self.dim). 为更新后 CLS 节点的 token
+    """
+
+    def __init__(self, dim, num_heads, dropout=0.1):
+        super().__init__()
+        self.dim = dim
+        self.num_heads = num_heads
+        self.dropout = dropout
+
+        # Multi-head attention layer
+        self.attention = nn.MultiheadAttention(embed_dim=dim, num_heads=num_heads, dropout=dropout)
+
+        # LayerNorm and FeedForward layers
+        self.norm1 = nn.LayerNorm(dim)
+        self.norm2 = nn.LayerNorm(dim)
+        self.ffn = nn.Sequential(
+            nn.Linear(dim, dim * 4),
+            nn.ReLU(),
+            nn.Linear(dim * 4, dim),
+            nn.Dropout(dropout)
+        )
+
+    def forward(self, h_token, batch, subg_mask):
+        # Step 1: Split tokens based on subg_mask
+        sample_idx, node_idx = subg_mask
+        batch_size = batch.size(1)
+        subgraph_tokens = []
+        for i in range(batch_size):
+            mask = sample_idx == i
+            subgraph_tokens.append(h_token[node_idx[mask]])
+        
+        # Step 2: Add CLS token to each subgraph
+        cls_tokens = []
+        padded_tokens = []
+        max_nodes = max(len(tokens) for tokens in subgraph_tokens)
+        for tokens in subgraph_tokens:
+            cls_token = tokens.mean(dim=0, keepdim=True)  # MeanPool for CLS initialization
+            cls_tokens.append(cls_token)
+            tokens_with_cls = torch.cat([cls_token, tokens], dim=0)
+            pad_size = max_nodes + 1 - tokens_with_cls.size(0)
+            padded_tokens.append(F.pad(tokens_with_cls, (0, 0, 0, pad_size)))  # Padding
+        
+        padded_tokens = torch.stack(padded_tokens)  # Shape: (batch_size, max_nodes + 1, dim)
+        cls_tokens = torch.cat(cls_tokens, dim=0)  # Shape: (batch_size, dim)
+
+        # Step 3: Compute attention
+        padded_tokens = padded_tokens.transpose(0, 1)  # Shape: (max_nodes + 1, batch_size, dim)
+        attn_output, _ = self.attention(padded_tokens, padded_tokens, padded_tokens)
+        attn_output = attn_output.transpose(0, 1)  # Shape: (batch_size, max_nodes + 1, dim)
+
+        # Step 4: Apply LayerNorm and FeedForward
+        attn_output = self.norm1(attn_output + padded_tokens.transpose(0, 1))
+        output = self.norm2(attn_output + self.ffn(attn_output))
+
+        # Step 5: Extract updated tokens
+        h_a = output[:, 1, :]  # Updated source node tokens
+        h_b = output[:, 2, :]  # Updated target node tokens
+        h_CLS = output[:, 0, :]  # Updated CLS tokens
+
+        return h_a, h_b, h_CLS

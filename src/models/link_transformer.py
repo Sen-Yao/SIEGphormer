@@ -195,7 +195,14 @@ class LinkTransformer(nn.Module):
         x_i, x_j = X_node[batch[0]], X_node[batch[1]]
         elementwise_edge_feats = self.elementwise_lin(x_i * x_j) # 论文注释: h_a * h_b，但是这里好像加了个线性层？
 
-        # att_weights 不重要，作者用来 debug 的        
+        # cn_info, onehop_info, non1hop_info = self.compute_node_mask(batch, test_set, adj_mask)
+        subg_mask = self.khop_sampling(batch=batch, k=3)
+        h_graphormer, (u_pos, v_pos) = self.graphormer(self.data, subg_mask, batch[0], batch[1])  # 输出应为 (batchsize, max_k+3, sefl.dim)
+        batch_size = h_graphormer.size(0)
+        u_emb = h_graphormer[torch.arange(batch_size), u_pos, :]
+        v_emb = h_graphormer[torch.arange(batch_size), v_pos, :]
+        graphormer_output = self.graphormer_encoder(u_emb, v_emb)
+        combined_feats = torch.cat((elementwise_edge_feats, pairwise_feats, graphormer_output), dim=-1)
 
         # 计算节点对的那些相关信息
         pairwise_feats, att_weights = self.calc_pairwise(batch, X_node, test_set, adj_mask=adj_mask, return_weights=return_weights)
@@ -833,3 +840,4 @@ class LinkTransformer(nn.Module):
         h_tokens = torch.cat((structure_info, node_features), dim=-1)
 
         return h_tokens
+    

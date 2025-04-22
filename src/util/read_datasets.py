@@ -283,12 +283,26 @@ def read_data_planetoid(args, device):
 
         data['norm_adj'] = adj
 
-
     data['adj_mask'] = data['adj_t'].to_torch_sparse_coo_tensor()
     data['full_adj_mask'] = data['adj_mask'] = data['adj_mask'].coalesce()
 
     ### Degree of nodes
     data['degree'] = degree(data['edge_index'][0], num_nodes=data['num_nodes']).to(device)
+
+    # 创建一个 data['CN'] 的 COO 格式矩阵，用于记录图中所有点之间的公共邻居个数
+    adj_matrix = coo_adj.tocsr()
+    cn_matrix = adj_matrix.dot(adj_matrix)
+    cn_matrix.setdiag(0)  # Remove self-loops
+    data['CN'] = sparse_mx_to_torch_sparse_tensor(cn_matrix).to(device)
+
+    # 创建一个 data['AA'] 的 COO 格式矩阵，用于记录图中所有点之间的 Adamic-Adar 指数
+    aa_matrix = adj_matrix.copy()
+    degrees = np.array(adj_matrix.sum(axis=1)).flatten()
+    degrees[degrees == 0] = 1  # Avoid division by zero
+    inv_degrees = 1.0 / np.log(degrees)
+    aa_matrix = adj_matrix.multiply(inv_degrees[:, None]).dot(adj_matrix)
+    aa_matrix.setdiag(0)  # Remove self-loops
+    data['AA'] = sparse_mx_to_torch_sparse_tensor(aa_matrix).to(device)
 
     ### Load PPR Matrix
     data['ppr'] = get_ppr(args.data_name, data['edge_index'], data['num_nodes'],
