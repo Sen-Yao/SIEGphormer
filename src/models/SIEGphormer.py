@@ -340,12 +340,6 @@ class SIEGphormer(nn.Module):
         a_indices = batch[0]
         b_indices = batch[1]
 
-        # 获取全局邻接矩阵和预计算的 CN 和 AA 矩阵
-        cn_matrix = self.data['CN'].clone()
-        aa_matrix = self.data['AA'].clone()
-        # 转换为稠密矩阵
-        cn_matrix = cn_matrix.to_dense()
-        aa_matrix = aa_matrix.to_dense()
         ppr = self.data["ppr"].to_dense()
 
 
@@ -353,17 +347,6 @@ class SIEGphormer(nn.Module):
         sample_indices = subg_mask[0]
         node_indices = subg_mask[1]
 
-        # 获取 CN(a, u) 和 CN(b, u)
-        cn_a = cn_matrix[a_indices[sample_indices], node_indices]
-        cn_b = cn_matrix[b_indices[sample_indices], node_indices]
-        heuristic_index[:, 0, 0] = cn_a
-        heuristic_index[:, 0, 1] = cn_b
-
-        # 获取 AA(a, u) 和 AA(b, u)
-        aa_a = aa_matrix[a_indices[sample_indices], node_indices]
-        aa_b = aa_matrix[b_indices[sample_indices], node_indices]
-        heuristic_index[:, 1, 0] = aa_a
-        heuristic_index[:, 1, 1] = aa_b
 
         # 获取 PPR(a, u) 和 PPR(b, u)
         ppr_a = torch.index_select(ppr, 0, a_indices)[sample_indices, node_indices]
