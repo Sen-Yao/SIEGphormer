@@ -111,6 +111,9 @@ class EncoderLayer(nn.Module):
         self.ffn.reset_parameters()
 
     def forward(self, x, attn_bias=None, spatial_pos_query=None, spatial_pos_key=None):
+        """
+        x: [n_graph, n_node+1, hidden_size]，其中 n_graph 固定为 1，节点多一个是虚拟节点，hidden_size 需要和 init 部分对应
+        """
         y = self.self_attention_norm(x)
         y = self.self_attention(y, y, y, attn_bias, spatial_pos_query, spatial_pos_key)
         y = self.self_attention_dropout(y)

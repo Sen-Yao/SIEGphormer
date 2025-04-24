@@ -10,7 +10,7 @@ import numpy as np
 import time
 
 from models.other_models import *
-from models.graphormer import Graphormer, SubgraphGraphormer
+from models.graphormer import *
 from modules.node_encoder import NodeEncoder
 from modules.layers import LinkTransformerLayer
 
@@ -60,7 +60,7 @@ class LinkTransformer(nn.Module):
         self.num_layers = train_args['trans_layers']
         self.num_nodes = data['x'].shape[0]
         if train_args['graphormer']:
-            self.out_dim = self.dim * 3
+            self.out_dim = self.dim * 2
         else:
             self.out_dim = self.dim * 2
 
@@ -108,7 +108,6 @@ class LinkTransformer(nn.Module):
         )
 
         self.drnl = torch.zeros((self.train_args['batch_size'], self.data['num_nodes']), device=device)
-        # print("init_drnl", self.drnl.dtype)
 
         self.graphormer = SubgraphGraphormer(n_layers=3,
                                      input_dim=self.dim,
@@ -125,7 +124,7 @@ class LinkTransformer(nn.Module):
                                      mul_bias=False,
                                      gravity_type=0,
                                      device=self.device)
-        self.graphormer.to(device=device)
+        # self.graphormer.to(device=device)
         self.graphormer_encoder =  PairMLP(
             num_layers=3, 
             in_channels=128,  # u_emb和v_emb的输入维度
@@ -193,7 +192,7 @@ class LinkTransformer(nn.Module):
         pairwise_feats, att_weights = self.calc_pairwise(batch, X_node, test_set, adj_mask=adj_mask, return_weights=return_weights)
 
         # Graphormer 部分
-        if self.train_args['graphormer'] and False:
+        if self.train_args['graphormer']:
             cn_info, onehop_info, non1hop_info = self.compute_node_mask(batch, test_set, adj_mask)
             subg_mask = torch.cat((cn_info[0], onehop_info[0], non1hop_info[0]), dim=-1)
             h_graphormer, (u_pos, v_pos) = self.graphormer(self.data, subg_mask, batch[0], batch[1])  # 输出应为 (batchsize, max_k+3, sefl.dim)
@@ -278,12 +277,20 @@ class LinkTransformer(nn.Module):
             else:
                 all_mask = torch.cat((cn_info[0], onehop_info[0]), dim=-1)
                 pes = self.get_pos_encodings(cn_info, onehop_info)
-            # all_mask 是稀疏矩阵形式的子图掩码。包括三个或两个级别的所有节点。
-            # pes 是所谓的位置编码，形状为  (子图规模, self.dim)
+            # all_mask 是稀疏矩阵形式的子图掩码。包括三个或两个级别的所有节点。形状为 [2, 整个 batch 中被采样到子图中的节点个数]
+            # pairwise_feats 是一个稠密矩阵，形状为 [batchsize, 2 * self.dim]，表示了每个节点对的特征被拼接在一起
+            # pes 是所谓的位置编码，如果开启了 DNRL，则形状为 [每个 batch 中被采样到子图中的节点个数,  2 *self.dim]
+            # print("all_mask_shape=", all_mask.shape)
+            # print("pairwise_feats shape=", pairwise_feats.shape)
             # print("pes_shape=", pes.shape)
             for l in range(self.num_layers):
                 # 论文注释：这里的 pairwise_feats 是 s(a,b)
+                # 实际使用的 num_layers 为 1，更新后 pairwise_feats 形状变为 [batchsize, self.dim]
                 pairwise_feats, att_weights = self.att_layers[l](all_mask, pairwise_feats, X_node, pes, None, return_weights)
+                
+                # 如果这里改成 SubGraphormer，则为
+                # h_graphormer, (u_pos, v_pos) = self.graphormer(self.data, subg_mask, batch[0], batch[1])
+                # 设法将输出的 h_u, h_v 和 h_CLS 形状映射为 [batchsize, self.dim] 即可
             
             num_cns, num_1hop, num_non1hop, num_neighbors = self.get_structure_cnts(batch, cn_info, onehop_info, non1hop_info, test_set=test_set) 
             # 论文注释：就是把其他个数 concat 进去，即论文最后的部分。
@@ -291,7 +298,8 @@ class LinkTransformer(nn.Module):
                 pairwise_feats = torch.cat((pairwise_feats, num_cns, num_1hop, num_non1hop, num_neighbors), dim=-1)
             else:
                 pairwise_feats = torch.cat((pairwise_feats, num_cns, num_1hop, num_neighbors), dim=-1)
-
+        
+        # 拼接完以后，pairwise_feats 形状为 [batchsize, pairwise_dim]，其中 pairwise_dim = self.dim * train_args['num_heads'] + count_dim
         pairwise_feats = self.pairwise_lin(pairwise_feats)
         return pairwise_feats, att_weights
 
@@ -306,12 +314,12 @@ class LinkTransformer(nn.Module):
         torch.Tensor
             Concatenated encodings for cn and 1-hop
         """
-        # info 就是 compute_node_mask 函数算出来的三个尺度的信息，其中有三个元素
-        # info[0] 是下标的稠密矩阵
-        # info[1] 是 ppr(a,u)， info[2] 是 ppr(b,u)，形状为 (子图节点个数)
+        # 各个指标的 info 就是 compute_node_mask 函数算出来的三个尺度的信息，其中有三个元素
+        # info[0] 是下标的稠密矩阵。# info[1] 是 ppr(a,u)， info[2] 是 ppr(b,u)，形状为 (子图节点个数)
         # 如果是 drnl_info，则只有两个元素
         
-        # 下面的 torch.stack((cn_info[1], cn_info[2]) 堆叠后形状为 (2, n), 加上 t() 转置为 (n, 2)，对应原文就是 CN 中的每个节点的 ppr(a,u) 和 ppr(b,u) 拼接起来‘
+        # n 为整个 batch 中被采样到子图中的节点个数
+        # 下面的 torch.stack((cn_info[1], cn_info[2]) 堆叠后形状为 (2, n), 加上 t() 转置为 (n, 2)，对应原文就是 CN 中的每个节点的 ppr(a,u) 和 ppr(b,u) 拼接起来
         # ppr_encoder_cn 是一个 MLP
         # 出结果的 cn_a 就是论文里的 rpe(a,u)，形状为 (n, self.dim)
 
@@ -339,8 +347,9 @@ class LinkTransformer(nn.Module):
 
         if drnl_info is not None:
             drnl_pe = self.drnl_encoder(drnl_info[1].unsqueeze(1))
+            # drnl position encoding 形状为 (n, self.dim)
             rpe_pe = torch.cat((cn_pe, onehop_pe, non1hop_pe), dim=0)
-            # print("drnl_pe", drnl_pe.shape)
+            # 返回结果形状应为 (n, 2 * self.dim)
             return torch.cat((drnl_pe, rpe_pe), dim=1)
         else:
             return torch.cat((cn_pe, onehop_pe, non1hop_pe), dim=0)
@@ -686,3 +695,15 @@ class LinkTransformer(nn.Module):
         # weighted_features = (nodes_features * weights.view(1, -1, 1)).sum(dim=1)
 
         return weighted_features
+
+    def graphormer(self, x):
+        """
+        基于 Graphormer 的思路，用输入的 CN，PPR，DNRL 等做启发式指标计算来算 key 和 query
+
+        Input:
+        x: [batch_size, 3 * dim] 为包含了其他节点信息等表征
+
+        Output:
+        output: [batch_size, dim] 为最终的输出
+        """
+

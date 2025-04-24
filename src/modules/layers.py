@@ -124,6 +124,9 @@ class LinkAttention(MessagePassing):
         # 为啥这里是 2
         out_dim = 3
 
+        # in_channels 是一个节点所对应的特征维度，正常来说是 self.dim
+        # out_dim 表示了输入个数
+
         if node_dim is None:
             node_dim = in_channels * out_dim
             # node_dim = in_channels + 1
