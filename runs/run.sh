@@ -22,9 +22,10 @@ nohup python ./src/run.py \
   --eval_steps 1 \
   --decay 0.975 \
   --runs 10 \
-  --kill_cnt 30 \
+  --kill_cnt 100 \
   --mat_prop 1 \
   --alpha 0.7 \
   --drnl 1 \
-  --device 0 \
-> ./logs/${cmd_time}-debug.log 2>&1 &
+  --device 2 \
+  --graphormer \
+> ./logs/${cmd_time}-instead_graphormer.log 2>&1 &

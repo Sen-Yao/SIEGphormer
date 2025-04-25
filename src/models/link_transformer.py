@@ -192,17 +192,8 @@ class LinkTransformer(nn.Module):
         pairwise_feats, att_weights = self.calc_pairwise(batch, X_node, test_set, adj_mask=adj_mask, return_weights=return_weights)
 
         # Graphormer 部分
-        if self.train_args['graphormer']:
-            cn_info, onehop_info, non1hop_info = self.compute_node_mask(batch, test_set, adj_mask)
-            subg_mask = torch.cat((cn_info[0], onehop_info[0], non1hop_info[0]), dim=-1)
-            h_graphormer, (u_pos, v_pos) = self.graphormer(self.data, subg_mask, batch[0], batch[1])  # 输出应为 (batchsize, max_k+3, sefl.dim)
-            batch_size = h_graphormer.size(0)
-            u_emb = h_graphormer[torch.arange(batch_size), u_pos, :]
-            v_emb = h_graphormer[torch.arange(batch_size), v_pos, :]
-            graphormer_output = self.graphormer_encoder(u_emb, v_emb)
-            combined_feats = torch.cat((elementwise_edge_feats, pairwise_feats, graphormer_output), dim=-1)
-        else:
-            combined_feats = torch.cat((elementwise_edge_feats, pairwise_feats), dim=-1)
+
+        combined_feats = torch.cat((elementwise_edge_feats, pairwise_feats), dim=-1)
 
         return combined_feats if not return_weights else (combined_feats, att_weights)
     
@@ -283,24 +274,25 @@ class LinkTransformer(nn.Module):
             # print("all_mask_shape=", all_mask.shape)
             # print("pairwise_feats shape=", pairwise_feats.shape)
             # print("pes_shape=", pes.shape)
-            for l in range(self.num_layers):
-                # 论文注释：这里的 pairwise_feats 是 s(a,b)
-                # 实际使用的 num_layers 为 1，更新后 pairwise_feats 形状变为 [batchsize, self.dim]
-                pairwise_feats, att_weights = self.att_layers[l](all_mask, pairwise_feats, X_node, pes, None, return_weights)
+            if self.train_args['graphormer']:
+                cn_info, onehop_info, non1hop_info = self.compute_node_mask(batch, test_set, adj_mask)
+                subg_mask = torch.cat((cn_info[0], onehop_info[0], non1hop_info[0]), dim=-1)
+                h_graphormer, (u_pos, v_pos) = self.graphormer(self.data, subg_mask, batch[0], batch[1])  # 输出应为 (batchsize, max_k+3, sefl.dim)
+                batch_size = h_graphormer.size(0)
+                u_emb = h_graphormer[torch.arange(batch_size), u_pos, :]
+                v_emb = h_graphormer[torch.arange(batch_size), v_pos, :]
+                graphormer_output = self.graphormer_encoder(u_emb, v_emb)
                 
-                # 如果这里改成 SubGraphormer，则为
-                # h_graphormer, (u_pos, v_pos) = self.graphormer(self.data, subg_mask, batch[0], batch[1])
-                # 设法将输出的 h_u, h_v 和 h_CLS 形状映射为 [batchsize, self.dim] 即可
-            
             num_cns, num_1hop, num_non1hop, num_neighbors = self.get_structure_cnts(batch, cn_info, onehop_info, non1hop_info, test_set=test_set) 
             # 论文注释：就是把其他个数 concat 进去，即论文最后的部分。
             if num_non1hop is not None:
-                pairwise_feats = torch.cat((pairwise_feats, num_cns, num_1hop, num_non1hop, num_neighbors), dim=-1)
+                pairwise_feats = torch.cat((graphormer_output, num_cns, num_1hop, num_non1hop, num_neighbors), dim=-1)
             else:
                 pairwise_feats = torch.cat((pairwise_feats, num_cns, num_1hop, num_neighbors), dim=-1)
         
         # 拼接完以后，pairwise_feats 形状为 [batchsize, pairwise_dim]，其中 pairwise_dim = self.dim * train_args['num_heads'] + count_dim
         pairwise_feats = self.pairwise_lin(pairwise_feats)
+        att_weights = None
         return pairwise_feats, att_weights
 
     
@@ -695,15 +687,3 @@ class LinkTransformer(nn.Module):
         # weighted_features = (nodes_features * weights.view(1, -1, 1)).sum(dim=1)
 
         return weighted_features
-
-    def graphormer(self, x):
-        """
-        基于 Graphormer 的思路，用输入的 CN，PPR，DNRL 等做启发式指标计算来算 key 和 query
-
-        Input:
-        x: [batch_size, 3 * dim] 为包含了其他节点信息等表征
-
-        Output:
-        output: [batch_size, dim] 为最终的输出
-        """
-

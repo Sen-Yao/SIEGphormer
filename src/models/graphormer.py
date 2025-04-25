@@ -544,7 +544,7 @@ class SubgraphGraphormer(Graphormer):
         return subgraph_list, (u_positions, v_positions)
 
     def _build_subgraph_features(self, data, sub_nodes, device):
-        """构建子图特征矩阵"""
+        """给定一个子图，构建子图中的特征矩阵"""
         k = len(sub_nodes)
         # 节点特征编码
         # 使用传播后的特征
@@ -566,6 +566,7 @@ class SubgraphGraphormer(Graphormer):
         spatial_pos_queries = []
         spatial_pos_keys = []
 
+        # 先按照子图遍历
         for sub_nodes in subgraphs:
             k = len(sub_nodes)
             if k == 0:

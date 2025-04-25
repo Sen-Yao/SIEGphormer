@@ -290,7 +290,7 @@ def read_data_planetoid(args, device):
     ### Degree of nodes
     data['degree'] = degree(data['edge_index'][0], num_nodes=data['num_nodes']).to(device)
 
-    ### Load PPR Matrix
+    ### Load PPR Matrix, coo 格式
     data['ppr'] = get_ppr(args.data_name, data['edge_index'], data['num_nodes'],
                           0.15, args.eps, False).to(device)
     data['ppr_test'] = data['ppr']
