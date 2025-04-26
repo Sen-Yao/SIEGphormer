@@ -26,6 +26,5 @@ nohup python ./src/run.py \
   --mat_prop 1 \
   --alpha 0.7 \
   --drnl 1 \
-  --device 2 \
-  --graphormer \
-> ./logs/${cmd_time}-instead_graphormer.log 2>&1 &
+  --device 0 \
+> ./logs/${cmd_time}-wo_graphormer.log 2>&1 &
